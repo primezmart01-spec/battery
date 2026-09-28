@@ -141,9 +141,27 @@ router.get('/orders', (req: AuthenticatedRequest, res: Response) => {
       params
     );
 
+    const detailedOrders = orders.map((o: any) => {
+      const items = query('SELECT * FROM order_items WHERE order_id = ?;', [o.id]);
+      const addresses = query('SELECT * FROM order_addresses WHERE order_id = ?;', [o.id]);
+      const timeline = query('SELECT * FROM order_status_history WHERE order_id = ? ORDER BY created_at ASC;', [o.id]);
+      const payment = queryOne('SELECT * FROM payments WHERE order_id = ?;', [o.id]);
+
+      return {
+        ...o,
+        items,
+        shipping_address: addresses.find((a: any) => a.type === 'shipping') || null,
+        billing_address: addresses.find((a: any) => a.type === 'billing') || null,
+        shippingAddress: addresses.find((a: any) => a.type === 'shipping') || null,
+        billingAddress: addresses.find((a: any) => a.type === 'billing') || null,
+        timeline,
+        payment
+      };
+    });
+
     res.json({
       success: true,
-      orders,
+      orders: detailedOrders,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -169,25 +187,44 @@ router.put('/orders/:id/status', (req: AuthenticatedRequest, res: Response) => {
     }
 
     const now = Date.now();
+    const newOrderStatus = orderStatus && orderStatus.trim() ? orderStatus.trim() : order.order_status;
+    const newPaymentStatus = paymentStatus && paymentStatus.trim() ? paymentStatus.trim() : order.payment_status;
+    const newTrackingNumber = trackingNumber !== undefined && trackingNumber !== null ? trackingNumber.trim() : order.tracking_number;
 
     transaction(() => {
       run(
         `UPDATE orders SET
-          order_status = COALESCE(?, order_status),
-          payment_status = COALESCE(?, payment_status),
-          tracking_number = COALESCE(?, tracking_number),
+          order_status = ?,
+          payment_status = ?,
+          tracking_number = ?,
           updated_at = ?
          WHERE id = ?;`,
-        [orderStatus || null, paymentStatus || null, trackingNumber || null, now, orderId]
+        [newOrderStatus, newPaymentStatus, newTrackingNumber, now, orderId]
       );
 
       // Record in order status timeline
-      const noteText = notes || `Status updated to ${orderStatus || order.order_status}${trackingNumber ? ` (Tracking: ${trackingNumber})` : ''}`;
+      const noteText = notes || `Status updated to ${newOrderStatus}${newTrackingNumber ? ` (Tracking: ${newTrackingNumber})` : ''}`;
       run(
         `INSERT INTO order_status_history (id, order_id, status, notes, changed_by, created_at)
          VALUES (?, ?, ?, ?, ?, ?);`,
-        [`osh_${now}_${Math.random().toString(36).substring(2, 6)}`, orderId, orderStatus || order.order_status, noteText, req.user?.email || 'admin', now]
+        [`osh_${now}_${Math.random().toString(36).substring(2, 6)}`, orderId, newOrderStatus, noteText, req.user?.email || 'admin', now]
       );
+
+      // Create notification for user if applicable
+      if (order.user_id) {
+        run(
+          `INSERT INTO notifications (id, user_id, type, title, message, link, is_read, created_at)
+           VALUES (?, ?, 'order', ?, ?, ?, 0, ?);`,
+          [
+            `notif_${now}_${Math.random().toString(36).substring(2, 6)}`,
+            order.user_id,
+            `Order #${order.order_number} Updated`,
+            `Your order #${order.order_number} status has been updated to ${newOrderStatus.toUpperCase()}.${newTrackingNumber ? ` Tracking ID: ${newTrackingNumber}` : ''}`,
+            `/account`,
+            now
+          ]
+        );
+      }
     });
 
     logAuditAction(req.adminId, req.user?.email, 'update_order_status', 'order', orderId, req.ip || 'unknown', `Order #${order.order_number} status changed to ${orderStatus || order.order_status}`);
@@ -287,14 +324,11 @@ router.get('/customers', (req: AuthenticatedRequest, res: Response) => {
   try {
     const customers = query(`
       SELECT 
-        u.id, u.email, u.first_name, u.last_name, u.phone, u.status, u.created_at,
-        COUNT(o.id) as orders_count,
-        COALESCE(SUM(o.total_amount), 0) as total_spent,
-        MAX(o.created_at) as last_order_date
+        u.id, u.email, u.first_name, u.last_name, u.phone, u.status, u.role, u.created_at,
+        (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id OR LOWER(o.customer_email) = LOWER(u.email)) as orders_count,
+        COALESCE((SELECT SUM(o.total_amount) FROM orders o WHERE o.user_id = u.id OR LOWER(o.customer_email) = LOWER(u.email)), 0) as total_spent,
+        (SELECT MAX(o.created_at) FROM orders o WHERE o.user_id = u.id OR LOWER(o.customer_email) = LOWER(u.email)) as last_order_date
       FROM users u
-      LEFT JOIN orders o ON u.id = o.user_id
-      WHERE u.role = 'customer'
-      GROUP BY u.id
       ORDER BY u.created_at DESC;
     `);
 

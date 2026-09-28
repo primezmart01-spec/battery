@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider } from './context/AuthContext';
+import { StoreSettingsProvider } from './context/StoreSettingsContext';
 import { CartProvider } from './context/CartContext';
 import { CompareProvider } from './context/CompareContext';
+import { WishlistProvider } from './context/WishlistContext';
 import { Header } from './components/common/Header';
 import { Footer } from './components/common/Footer';
 import { CartDrawer } from './components/common/CartDrawer';
@@ -107,47 +109,51 @@ export default function App() {
   const isAdminRoute = currentRoute === 'admin';
 
   return (
-    <AuthProvider>
-      <CartProvider>
-        <CompareProvider>
-          <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900 selection:bg-red-600 selection:text-white">
-            {/* Header (hidden in dedicated full admin panel) */}
-            {!isAdminRoute && (
-              <Header onNavigate={navigate} currentRoute={currentRoute} />
-            )}
+    <StoreSettingsProvider>
+      <AuthProvider>
+        <CartProvider>
+          <CompareProvider>
+            <WishlistProvider>
+              <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900 selection:bg-red-600 selection:text-white">
+                {/* Header (hidden in dedicated full admin panel) */}
+                {!isAdminRoute && (
+                  <Header onNavigate={navigate} currentRoute={currentRoute} />
+                )}
 
-            {/* Main Content Router */}
-            <main className="flex-1">
-              {currentRoute === 'home' && <HomePage onNavigate={navigate} />}
-              {currentRoute === 'shop' && <ShopPage initialFilter={routeParam} onNavigate={navigate} />}
-              {currentRoute === 'product' && <ProductDetailPage slug={routeParam} onNavigate={navigate} />}
-              {currentRoute === 'brand' && <BrandPage slug={routeParam} onNavigate={navigate} />}
-              {currentRoute === 'category' && <CategoryPage slug={routeParam} onNavigate={navigate} />}
-              {currentRoute === 'cart' && <CartPage onNavigate={navigate} />}
-              {currentRoute === 'checkout' && <CheckoutPage onNavigate={navigate} />}
-              {currentRoute === 'order-confirmation' && <OrderConfirmationPage orderId={routeParam} onNavigate={navigate} />}
-              {currentRoute === 'track-order' && <OrderTrackingPage initialOrderNumber={routeParam} onNavigate={navigate} />}
-              {currentRoute === 'payment-portal' && <PaymentPortalPage orderId={routeParam} onNavigate={navigate} />}
-              {currentRoute === 'compare' && <ComparePage onNavigate={navigate} />}
-              {currentRoute === 'wishlist' && <WishlistPage onNavigate={navigate} />}
-              {currentRoute === 'account' && <AccountPage onNavigate={navigate} />}
-              {currentRoute === 'login' && <AuthPages initialMode="login" onNavigate={navigate} />}
-              {currentRoute === 'register' && <AuthPages initialMode="register" onNavigate={navigate} />}
-              {currentRoute === 'vehicle-finder' && <ShopPage initialFilter="" onNavigate={navigate} />}
-              {currentRoute === 'admin' && <AdminLayout onNavigate={navigate} />}
-              {['about', 'contact', 'warranty', 'shipping', 'privacy', 'terms'].includes(currentRoute) && (
-                <CmsPages pageType={currentRoute as any} onNavigate={navigate} />
-              )}
-            </main>
+                {/* Main Content Router */}
+                <main className="flex-1">
+                  {currentRoute === 'home' && <HomePage onNavigate={navigate} />}
+                  {currentRoute === 'shop' && <ShopPage initialFilter={routeParam} onNavigate={navigate} />}
+                  {currentRoute === 'product' && <ProductDetailPage slug={routeParam} onNavigate={navigate} />}
+                  {currentRoute === 'brand' && <BrandPage slug={routeParam} onNavigate={navigate} />}
+                  {currentRoute === 'category' && <CategoryPage slug={routeParam} onNavigate={navigate} />}
+                  {currentRoute === 'cart' && <CartPage onNavigate={navigate} />}
+                  {currentRoute === 'checkout' && <CheckoutPage onNavigate={navigate} />}
+                  {currentRoute === 'order-confirmation' && <OrderConfirmationPage orderId={routeParam} onNavigate={navigate} />}
+                  {currentRoute === 'track-order' && <OrderTrackingPage initialOrderNumber={routeParam} onNavigate={navigate} />}
+                  {currentRoute === 'payment-portal' && <PaymentPortalPage orderId={routeParam} onNavigate={navigate} />}
+                  {currentRoute === 'compare' && <ComparePage onNavigate={navigate} />}
+                  {currentRoute === 'wishlist' && <WishlistPage onNavigate={navigate} />}
+                  {currentRoute === 'account' && <AccountPage onNavigate={navigate} />}
+                  {currentRoute === 'login' && <AuthPages initialMode="login" onNavigate={navigate} />}
+                  {currentRoute === 'register' && <AuthPages initialMode="register" onNavigate={navigate} />}
+                  {currentRoute === 'vehicle-finder' && <ShopPage initialFilter="" onNavigate={navigate} />}
+                  {currentRoute === 'admin' && <AdminLayout onNavigate={navigate} />}
+                  {['about', 'contact', 'warranty', 'shipping', 'privacy', 'terms'].includes(currentRoute) && (
+                    <CmsPages pageType={currentRoute as any} onNavigate={navigate} />
+                  )}
+                </main>
 
-            {/* Slide-out Cart Drawer */}
-            <CartDrawer onNavigate={navigate} />
+                {/* Slide-out Cart Drawer */}
+                <CartDrawer onNavigate={navigate} />
 
-            {/* Global Footer (hidden on admin page) */}
-            {!isAdminRoute && <Footer onNavigate={navigate} />}
-          </div>
-        </CompareProvider>
-      </CartProvider>
-    </AuthProvider>
+                {/* Global Footer (hidden on admin page) */}
+                {!isAdminRoute && <Footer onNavigate={navigate} />}
+              </div>
+            </WishlistProvider>
+          </CompareProvider>
+        </CartProvider>
+      </AuthProvider>
+    </StoreSettingsProvider>
   );
 }

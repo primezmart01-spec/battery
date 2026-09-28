@@ -410,6 +410,7 @@ router.put('/:id', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
       shortDesc,
       description,
       features,
+      images,
       isFeatured,
       isBestseller,
       isNewArrival,
@@ -435,6 +436,20 @@ router.put('/:id', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
           status || 'published', now, productId
         ]
       );
+
+      // Update images
+      if (Array.isArray(images)) {
+        run('DELETE FROM product_images WHERE product_id = ?;', [productId]);
+        images.forEach((img: any, idx: number) => {
+          const imgUrl = typeof img === 'string' ? img : img.image_url;
+          if (imgUrl) {
+            run(
+              'INSERT INTO product_images (id, product_id, image_url, alt_text, display_order, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);',
+              [`img_${productId}_${idx}_${Date.now()}`, productId, imgUrl, `${name} image ${idx + 1}`, idx, idx === 0 ? 1 : 0, now]
+            );
+          }
+        });
+      }
 
       // Update inventory table
       run('UPDATE inventory SET current_stock = ?, updated_at = ? WHERE product_id = ?;', [stockQuantity, now, productId]);

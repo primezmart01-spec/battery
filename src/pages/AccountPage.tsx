@@ -10,7 +10,8 @@ import {
   Printer,
   AlertTriangle,
   Clock,
-  LogOut
+  LogOut,
+  RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Order, Address } from '../types';
@@ -57,28 +58,60 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
 
+  const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
+
+  const loadOrders = async () => {
+    const token = localStorage.getItem('cbf10_token');
+    if (!token || !user) return;
+    setIsRefreshingOrders(true);
+    try {
+      const res = await fetch('/api/orders', {
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+        cache: 'no-store'
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.orders)) {
+        setOrders(data.orders);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsRefreshingOrders(false);
+    }
+  };
+
   useEffect(() => {
     if (!user) return;
     setFirstName(user.firstName);
     setLastName(user.lastName);
     setPhone(user.phone || '');
 
-    // Fetch orders
-    fetch('/api/orders')
-      .then(r => r.json())
-      .then(d => {
-        if (d.success) setOrders(d.orders || []);
-      })
-      .catch(console.error);
+    // Fetch orders & addresses with auth headers
+    loadOrders();
 
-    // Fetch addresses
-    fetch('/api/auth/addresses')
-      .then(r => r.json())
-      .then(d => {
-        if (d.success) setAddresses(d.addresses || []);
+    const token = localStorage.getItem('cbf10_token');
+    if (token) {
+      fetch('/api/auth/addresses', {
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include'
       })
-      .catch(console.error);
+        .then(r => r.json())
+        .then(d => {
+          if (d.success) setAddresses(d.addresses || []);
+        })
+        .catch(console.error);
+    }
   }, [user]);
+
+  // Re-fetch and auto-poll when user switches to orders tab
+  useEffect(() => {
+    if (activeTab === 'orders') {
+      loadOrders();
+      const interval = setInterval(loadOrders, 10000); // Auto-poll order status every 10 seconds
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
 
   if (!user) {
     return (
@@ -288,7 +321,18 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
             {activeTab === 'orders' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-extrabold text-base text-slate-900">Order History</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-extrabold text-base text-slate-900">Order History</h3>
+                    <button
+                      onClick={loadOrders}
+                      disabled={isRefreshingOrders}
+                      className="text-xs text-slate-600 hover:text-slate-900 font-bold flex items-center gap-1 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-md border border-slate-200 transition-colors"
+                      title="Sync latest order status from server"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isRefreshingOrders ? 'animate-spin text-red-600' : ''}`} />
+                      <span>{isRefreshingOrders ? 'Syncing...' : 'Sync Status'}</span>
+                    </button>
+                  </div>
                   <button
                     onClick={() => onNavigate('shop')}
                     className="text-xs text-red-600 font-bold hover:underline"
@@ -312,13 +356,14 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
                 ) : (
                   orders.map(order => (
                     <div key={order.id} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                      {/* Order Header */}
                       <div className="flex flex-wrap items-center justify-between pb-3 border-b border-slate-100 gap-2">
                         <div>
                           <span className="font-mono font-bold text-slate-900 text-sm">
                             #{order.order_number}
                           </span>
                           <span className="text-xs text-slate-400 ml-2">
-                            {new Date(order.created_at).toLocaleDateString()}
+                            {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </span>
                         </div>
 
@@ -329,6 +374,12 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
                           <span className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full ${
                             order.order_status === 'delivered'
                               ? 'bg-emerald-100 text-emerald-800'
+                              : order.order_status === 'shipped' || order.order_status === 'out_for_delivery'
+                              ? 'bg-blue-100 text-blue-800'
+                              : order.order_status === 'cancelled'
+                              ? 'bg-rose-100 text-rose-800'
+                              : order.order_status === 'confirmed' || order.order_status === 'processing' || order.order_status === 'packed'
+                              ? 'bg-purple-100 text-purple-800'
                               : 'bg-amber-100 text-amber-800'
                           }`}>
                             {order.order_status.replace(/_/g, ' ')}
@@ -336,14 +387,47 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
                         </div>
                       </div>
 
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+                      {/* Product Line Items List */}
+                      {order.items && order.items.length > 0 && (
+                        <div className="bg-slate-50/80 border border-slate-200/80 rounded-lg p-3 space-y-2 text-xs">
+                          <span className="font-bold text-[11px] text-slate-500 uppercase tracking-wider block mb-1">
+                            Ordered Items ({order.items.length})
+                          </span>
+                          {order.items.map((it: any, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between gap-3 pt-1 border-t border-slate-200/50 first:border-0 first:pt-0">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-10 h-10 bg-white border border-slate-200 rounded p-0.5 flex-shrink-0 flex items-center justify-center">
+                                  <img
+                                    src={it.product_image || it.image_url || '/uploads/battery_ags_gl65.jpg'}
+                                    alt=""
+                                    onError={(e) => { (e.target as HTMLImageElement).src = '/uploads/battery_ags_gl65.jpg'; }}
+                                    className="max-h-full max-w-full object-contain"
+                                  />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-slate-900 truncate">{it.product_title || 'Lead-Acid Battery'}</div>
+                                  <div className="text-[10px] text-slate-500 font-mono">
+                                    SKU: {it.sku} · Qty: {it.quantity} × Rs. {Number(it.unit_price).toLocaleString()}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="font-mono font-bold text-slate-900 whitespace-nowrap">
+                                Rs. {Number(it.subtotal_price || (it.unit_price * it.quantity)).toLocaleString()}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Summary & Action Buttons */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs pt-1">
                         <div>
                           <div className="font-bold text-slate-800">
-                            Total: <span className="font-mono text-slate-900 text-sm">Rs. {Number(order.total_amount).toLocaleString()}</span>
+                            Grand Total: <span className="font-mono text-slate-900 text-sm">Rs. {Number(order.total_amount).toLocaleString()}</span>
                           </div>
                           {order.tracking_number && (
                             <div className="text-slate-500 mt-0.5">
-                              Tracking: <span className="font-mono font-semibold">{order.tracking_number}</span>
+                              Tracking ID: <span className="font-mono font-bold text-slate-900">{order.tracking_number}</span>
                             </div>
                           )}
                         </div>
@@ -361,7 +445,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
                             onClick={() => onNavigate('track-order', order.order_number)}
                             className="bg-red-600 hover:bg-red-700 text-white font-bold px-3.5 py-1.5 rounded-lg transition-colors"
                           >
-                            Track Van
+                            Track Delivery
                           </button>
                         </div>
                       </div>

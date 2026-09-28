@@ -50,18 +50,18 @@ export function generateOrderConfirmationEmail(order: any, items: any[]): { subj
       (item) => `
       <tr>
         <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">
-          <strong>${item.product_title}</strong><br/>
-          <small style="color: #64748b;">SKU: ${item.sku} | ${item.ah_capacity}Ah | ${item.warranty_months} Months Official Warranty</small>
+          <strong>${item.product_title || item.title}</strong><br/>
+          <small style="color: #64748b;">SKU: ${item.sku} | ${item.ah_capacity ? `${item.ah_capacity}Ah` : ''} | ${item.warranty_months || 12} Months Official Warranty</small>
         </td>
         <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">${item.quantity}</td>
         <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">Rs. ${Number(item.unit_price).toLocaleString()}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">Rs. ${Number(item.subtotal_price).toLocaleString()}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">Rs. ${Number(item.subtotal_price || (item.unit_price * item.quantity)).toLocaleString()}</td>
       </tr>
     `
     )
     .join('');
 
-  const subject = `Order Confirmed #${order.order_number} - Chaudhary Battery And UPS F10`;
+  const subject = `Order Confirmed #${order.order_number} [Tracking: ${order.tracking_number}] - Chaudhary Battery F10`;
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
       <div style="background-color: #0f172a; padding: 24px; text-align: center; color: #ffffff;">
@@ -72,25 +72,40 @@ export function generateOrderConfirmationEmail(order: any, items: any[]): { subj
       <div style="padding: 24px;">
         <h2 style="font-size: 18px; color: #0f172a; margin-top: 0;">Assalam-o-Alaikum, ${order.customer_name}!</h2>
         <p style="color: #475569; font-size: 14px; line-height: 1.5;">
-          Thank you for choosing Chaudhary Battery And UPS. Your order <strong>#${order.order_number}</strong> has been received and is being prepared for prompt delivery.
+          Thank you for choosing Chaudhary Battery And UPS. Your order <strong>#${order.order_number}</strong> has been received and is being prepared for express delivery.
         </p>
 
-        <div style="background-color: #f8fafc; border-radius: 6px; padding: 16px; margin: 20px 0; font-size: 13px;">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-            <span><strong>Order Number:</strong> #${order.order_number}</span>
-            <span><strong>Payment Method:</strong> ${order.payment_method.toUpperCase()}</span>
+        <!-- AUTO-GENERATED COURIER TRACKING BOX -->
+        <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 20px 0; text-align: center;">
+          <div style="color: #166534; font-weight: bold; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Official Courier Tracking ID</div>
+          <div style="font-size: 22px; font-weight: 900; font-family: monospace; color: #0f172a; letter-spacing: 1px; margin: 6px 0;">${order.tracking_number}</div>
+          <p style="margin: 4px 0 12px; font-size: 12px; color: #15803d;">Your delivery van has been assigned. Track live status anytime on our website.</p>
+        </div>
+
+        <!-- ORDER & PAYMENT DETAILS BOX -->
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 13px;">
+          <div style="margin-bottom: 8px;">
+            <strong>Order Number:</strong> #${order.order_number}
           </div>
+          <div style="margin-bottom: 8px;">
+            <strong>Payment Method:</strong> <span style="text-transform: uppercase; font-weight: bold;">${order.payment_method}</span>
+          </div>
+          ${order.transaction_reference ? `
+          <div style="margin-bottom: 8px; background: #ffffff; padding: 8px 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 12px;">
+            <strong>Client Payment & Bank Details:</strong><br/>
+            <span style="font-family: monospace; color: #0f172a;">${order.transaction_reference}</span>
+          </div>` : ''}
           <div>
-            <span><strong>Payment Status:</strong> <span style="color: ${order.payment_status === 'paid' ? '#16a34a' : '#d97706'}; font-weight: bold;">${order.payment_status.toUpperCase()}</span></span>
+            <strong>Payment Status:</strong> <span style="color: ${order.payment_status === 'paid' ? '#16a34a' : '#d97706'}; font-weight: bold; text-transform: uppercase;">${order.payment_status}</span>
           </div>
         </div>
 
         <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px;">
           <thead>
             <tr style="background: #f1f5f9; text-align: left;">
-              <th style="padding: 10px;">Product</th>
+              <th style="padding: 10px;">Product Description</th>
               <th style="padding: 10px; text-align: center;">Qty</th>
-              <th style="padding: 10px; text-align: right;">Price</th>
+              <th style="padding: 10px; text-align: right;">Unit Price</th>
               <th style="padding: 10px; text-align: right;">Total</th>
             </tr>
           </thead>
@@ -106,21 +121,21 @@ export function generateOrderConfirmationEmail(order: any, items: any[]): { subj
           </div>
           ${order.discount > 0 ? `
           <div style="display: flex; justify-content: space-between; color: #16a34a;">
-            <span>Discount:</span>
+            <span>Discount / Rebate:</span>
             <span>-Rs. ${Number(order.discount).toLocaleString()}</span>
           </div>` : ''}
           <div style="display: flex; justify-content: space-between;">
             <span>Delivery:</span>
-            <span>${order.shipping_amount === 0 ? 'FREE' : `Rs. ${Number(order.shipping_amount).toLocaleString()}`}</span>
+            <span>${order.shipping_amount === 0 ? 'FREE (Islamabad)' : `Rs. ${Number(order.shipping_amount).toLocaleString()}`}</span>
           </div>
           <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 15px; border-top: 2px solid #0f172a; padding-top: 6px; margin-top: 6px;">
-            <span>Total:</span>
+            <span>Total Payable:</span>
             <span>Rs. ${Number(order.total_amount).toLocaleString()}</span>
           </div>
         </div>
 
         <div style="margin-top: 30px; padding: 16px; background: #eff6ff; border-left: 4px solid #2563eb; border-radius: 4px; font-size: 13px; color: #1e40af;">
-          <strong>Official Warranty Notice:</strong> The stamped warranty card will be handed to you upon delivery. Keep it safe for 100% replacement coverage at our F-10 Markaz shop.
+          <strong>Official Stamped Warranty Notice:</strong> The company stamped warranty card with dealer seal will be handed to you upon delivery.
         </div>
       </div>
 

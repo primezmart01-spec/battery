@@ -23,7 +23,11 @@ import {
   Trash2,
   TrendingUp,
   CreditCard,
-  DollarSign
+  DollarSign,
+  RefreshCw,
+  FileText,
+  ChevronDown,
+  MapPin
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Order, Product, Brand, Category, Coupon, Review } from '../../types';
@@ -55,6 +59,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
   const [reviews, setReviews] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsSuccess, setSettingsSuccess] = useState('');
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState<Order | null>(null);
 
   // Product Modal State
@@ -74,8 +80,33 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
     ahCapacity: 50,
     cca: 400,
     warrantyMonths: 12,
-    shortDesc: ''
+    shortDesc: '',
+    imageUrl: '',
+    isAutoSku: true
   });
+
+  useEffect(() => {
+    if (!editingProductId && productForm.name) {
+      const brandCode = (productForm.brandId || 'brand_ags').replace('brand_', '').toUpperCase();
+      const categoryCode = (productForm.categoryId || 'cat_car').replace('cat_', '').toUpperCase();
+      const ahCode = productForm.ahCapacity ? `${productForm.ahCapacity}AH` : '50AH';
+      
+      const generatedSlug = productForm.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+
+      const cleanName = productForm.name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 4).toUpperCase();
+      const autoSku = `${brandCode}-${categoryCode}-${ahCode}-${cleanName || 'BAT'}`;
+      
+      setProductForm((prev: any) => ({
+        ...prev,
+        slug: generatedSlug,
+        sku: prev.sku && !prev.isAutoSku ? prev.sku : autoSku,
+        isAutoSku: prev.sku && !prev.isAutoSku ? false : true
+      }));
+    }
+  }, [productForm.name, productForm.brandId, productForm.categoryId, productForm.ahCapacity, editingProductId]);
 
   // Stock Adjustment Modal
   const [stockModalOpen, setStockModalOpen] = useState(false);
@@ -99,16 +130,18 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
   // Fetch admin data
   const loadAdminData = () => {
     if (!isAdmin) return;
+    const token = localStorage.getItem('cbf10_token');
+    const headers = { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) };
 
-    fetch('/api/admin/dashboard').then(r => r.json()).then(d => { if (d.success) setStats(d); });
-    fetch('/api/admin/orders').then(r => r.json()).then(d => { if (d.success) setOrders(d.orders || []); });
-    fetch('/api/products?limit=50').then(r => r.json()).then(d => { if (d.success) setProducts(d.products || []); });
-    fetch('/api/admin/inventory').then(r => r.json()).then(d => { if (d.success) { setInventoryItems(d.items || []); setInventoryLogs(d.logHistory || []); } });
-    fetch('/api/admin/customers').then(r => r.json()).then(d => { if (d.success) setCustomers(d.customers || []); });
-    fetch('/api/admin/coupons').then(r => r.json()).then(d => { if (d.success) setCoupons(d.coupons || []); });
-    fetch('/api/admin/reviews').then(r => r.json()).then(d => { if (d.success) setReviews(d.reviews || []); });
-    fetch('/api/admin/audit-logs').then(r => r.json()).then(d => { if (d.success) setAuditLogs(d.logs || []); });
-    fetch('/api/admin/settings').then(r => r.json()).then(d => { if (d.success) setSettings(d.settings || {}); });
+    fetch('/api/admin/dashboard', { headers, credentials: 'include' }).then(r => r.json()).then(d => { if (d.success) setStats(d); });
+    fetch('/api/admin/orders', { headers, credentials: 'include' }).then(r => r.json()).then(d => { if (d.success) setOrders(d.orders || []); });
+    fetch('/api/products?limit=50', { headers, credentials: 'include' }).then(r => r.json()).then(d => { if (d.success) setProducts(d.products || []); });
+    fetch('/api/admin/inventory', { headers, credentials: 'include' }).then(r => r.json()).then(d => { if (d.success) { setInventoryItems(d.items || []); setInventoryLogs(d.logHistory || []); } });
+    fetch('/api/admin/customers', { headers, credentials: 'include' }).then(r => r.json()).then(d => { if (d.success) setCustomers(d.customers || []); });
+    fetch('/api/admin/coupons', { headers, credentials: 'include' }).then(r => r.json()).then(d => { if (d.success) setCoupons(d.coupons || []); });
+    fetch('/api/admin/reviews', { headers, credentials: 'include' }).then(r => r.json()).then(d => { if (d.success) setReviews(d.reviews || []); });
+    fetch('/api/admin/audit-logs', { headers, credentials: 'include' }).then(r => r.json()).then(d => { if (d.success) setAuditLogs(d.logs || []); });
+    fetch('/api/admin/settings', { headers, credentials: 'include' }).then(r => r.json()).then(d => { if (d.success) setSettings(d.settings || {}); });
   };
 
   useEffect(() => {
@@ -175,16 +208,39 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
     }
   };
 
-  const handleUpdateOrderStatus = async (orderId: string, status: string) => {
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [trackingInputs, setTrackingInputs] = useState<Record<string, string>>({});
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+
+  const handleUpdateOrderStatus = async (
+    orderId: string,
+    status?: string,
+    trackingNumber?: string,
+    notes?: string,
+    paymentStatus?: string
+  ) => {
     try {
+      setUpdatingOrderId(orderId);
+      const token = localStorage.getItem('cbf10_token');
       await fetch(`/api/admin/orders/${orderId}/status`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderStatus: status })
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          orderStatus: status,
+          paymentStatus,
+          trackingNumber: trackingNumber !== undefined ? trackingNumber : trackingInputs[orderId],
+          notes
+        })
       });
       loadAdminData();
     } catch (err) {
       console.error(err);
+    } finally {
+      setUpdatingOrderId(null);
     }
   };
 
@@ -209,18 +265,88 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
     }
   };
 
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingSettings(true);
+    setSettingsSuccess('');
+    try {
+      const token = localStorage.getItem('cbf10_token');
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        credentials: 'include',
+        body: JSON.stringify(settings)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSettingsSuccess('Store configurations successfully updated across the entire application!');
+        loadAdminData();
+        // Also trigger public settings reload if possible
+        try {
+          window.dispatchEvent(new Event('storage'));
+          window.dispatchEvent(new Event('store-settings-updated'));
+        } catch (_) {}
+      } else {
+        alert(data.error || 'Failed to save settings');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleEditProduct = (p: Product) => {
+    setEditingProductId(p.id);
+    setProductForm({
+      name: p.name || '',
+      slug: p.slug || '',
+      brandId: p.brand_id || (p as any).brandId || 'brand_ags',
+      categoryId: p.category_id || (p as any).categoryId || 'cat_car',
+      sku: p.sku || '',
+      price: p.price || 0,
+      salePrice: p.sale_price || (p as any).salePrice || 0,
+      stockQuantity: p.stock_quantity ?? (p as any).stockQuantity ?? 0,
+      batteryType: p.battery_type || (p as any).batteryType || 'Dry Charged Lead-Acid',
+      voltage: p.voltage || '12V',
+      ahCapacity: p.ah_capacity || (p as any).ahCapacity || 50,
+      cca: p.cca || 400,
+      warrantyMonths: p.warranty_months || (p as any).warrantyMonths || 12,
+      shortDesc: p.short_desc || (p as any).shortDesc || '',
+      status: (p as any).status || 'published',
+      imageUrl: p.primary_image || (p as any).images?.[0]?.image_url || '',
+      isAutoSku: false
+    });
+    setProductModalOpen(true);
+  };
+
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const url = editingProductId ? `/api/products/${editingProductId}` : '/api/products';
       const method = editingProductId ? 'PUT' : 'POST';
+      const token = localStorage.getItem('cbf10_token');
+
+      const imagesToSave = productForm.imageUrl ? [productForm.imageUrl] : [];
+      const payload = {
+        ...productForm,
+        images: imagesToSave
+      };
 
       await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(productForm)
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload)
       });
       setProductModalOpen(false);
+      setEditingProductId(null);
       loadAdminData();
     } catch (err) {
       console.error(err);
@@ -230,7 +356,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
   const handleDeleteProduct = async (id: string) => {
     if (!confirm('Are you sure you want to delete this product?')) return;
     try {
-      await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      const token = localStorage.getItem('cbf10_token');
+      await fetch(`/api/products/${id}`, {
+        method: 'DELETE',
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        credentials: 'include'
+      });
       loadAdminData();
     } catch (err) {
       console.error(err);
@@ -268,43 +401,43 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
   // If not logged in as Admin, show Admin Authorization Screen with Quick Access
   if (!isAdmin) {
     return (
-      <div className="bg-slate-950 min-h-screen py-16 flex items-center justify-center p-4 text-white">
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
+      <div className="bg-slate-100 min-h-screen py-16 flex items-center justify-center p-4 text-slate-800">
+        <div className="max-w-md w-full bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
           <div className="text-center">
-            <div className="w-14 h-14 bg-red-600 rounded-2xl flex items-center justify-center mx-auto mb-3 text-white shadow-xl shadow-red-600/30">
+            <div className="w-14 h-14 bg-red-600 rounded-2xl flex items-center justify-center mx-auto mb-3 text-white shadow-xl shadow-red-600/20">
               <Lock className="w-7 h-7" />
             </div>
-            <h2 className="text-2xl font-black text-white tracking-tight">Chaudhary Battery Admin Portal</h2>
-            <p className="text-xs text-slate-400 mt-1">
+            <h2 className="text-2xl font-black text-slate-950 tracking-tight">Chaudhary Battery Admin Portal</h2>
+            <p className="text-xs text-slate-500 mt-1">
               Authorized Management Dashboard · F-10 Markaz Islamabad
             </p>
           </div>
 
           {/* Quick Access Card */}
-          <div className="bg-slate-800/90 border border-amber-500/30 rounded-xl p-4 text-xs space-y-3">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs space-y-3">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-amber-400 flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-red-650" />
                 <span>Admin Credentials</span>
               </span>
-              <span className="bg-amber-400/10 text-amber-300 font-mono text-[10px] px-2 py-0.5 rounded border border-amber-400/20">
+              <span className="bg-red-50 text-red-750 font-bold text-[10px] px-2 py-0.5 rounded border border-red-100">
                 Super Admin
               </span>
             </div>
 
-            <div className="space-y-1 font-mono text-[11px] bg-slate-950 p-2.5 rounded-lg border border-slate-700/60">
+            <div className="space-y-1 font-mono text-[11px] bg-white p-2.5 rounded-lg border border-slate-200">
               <div className="flex justify-between">
-                <span className="text-slate-400">Email:</span>
-                <span className="text-white font-bold select-all">admin@chaudharybattery.pk</span>
+                <span className="text-slate-500">Email:</span>
+                <span className="text-slate-900 font-bold select-all">admin@chaudharybattery.pk</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Password:</span>
-                <span className="text-amber-300 font-bold select-all">ChaudharyAdmin@2026!</span>
+                <span className="text-slate-500">Password:</span>
+                <span className="text-red-650 font-bold select-all">ChaudharyAdmin@2026!</span>
               </div>
               {user && (
-                <div className="flex justify-between pt-1 border-t border-slate-800 text-[10px]">
-                  <span className="text-slate-400">Current User:</span>
-                  <span className="text-emerald-400">{user.email}</span>
+                <div className="flex justify-between pt-1 border-t border-slate-100 text-[10px]">
+                  <span className="text-slate-500">Current User:</span>
+                  <span className="text-emerald-700 font-bold">{user.email}</span>
                 </div>
               )}
             </div>
@@ -314,7 +447,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                 type="button"
                 onClick={handleQuickSuperAdmin}
                 disabled={isLoggingIn}
-                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold py-2.5 px-4 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20"
+                className="w-full bg-red-600 hover:bg-red-700 text-white font-extrabold py-2.5 px-4 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-red-600/10"
               >
                 <span>⚡ 1-Click Sign In as Super Admin</span>
               </button>
@@ -324,7 +457,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                   type="button"
                   onClick={handlePromoteCurrent}
                   disabled={isLoggingIn}
-                  className="w-full bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 px-3 rounded-lg text-[11px] transition-colors"
+                  className="w-full bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold py-2 px-3 rounded-lg text-[11px] transition-colors"
                 >
                   Promote {user.email} to Super Admin
                 </button>
@@ -333,54 +466,54 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           </div>
 
           <div className="relative flex py-1 items-center">
-            <div className="flex-grow border-t border-slate-800"></div>
-            <span className="flex-shrink mx-3 text-slate-500 text-[10px] uppercase font-bold tracking-wider">or sign in with password</span>
-            <div className="flex-grow border-t border-slate-800"></div>
+            <div className="flex-grow border-t border-slate-200"></div>
+            <span className="flex-shrink mx-3 text-slate-400 text-[10px] uppercase font-bold tracking-wider">or sign in with password</span>
+            <div className="flex-grow border-t border-slate-200"></div>
           </div>
 
           <form onSubmit={handleAdminLogin} className="space-y-4 text-xs">
             {loginErr && (
-              <div className="p-3 bg-red-900/40 border border-red-700 text-red-200 rounded-lg flex items-center gap-2">
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                 <span>{loginErr}</span>
               </div>
             )}
 
             <div>
-              <label className="block text-slate-300 font-bold mb-1">Administrator Email</label>
+              <label className="block text-slate-700 font-bold mb-1">Administrator Email</label>
               <input
                 type="email"
                 required
                 value={adminEmail}
                 onChange={e => setAdminEmail(e.target.value)}
                 placeholder="admin@chaudharybattery.pk"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-red-500"
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-red-500"
               />
             </div>
 
             <div>
-              <label className="block text-slate-300 font-bold mb-1">Admin Password</label>
+              <label className="block text-slate-700 font-bold mb-1">Admin Password</label>
               <input
                 type="password"
                 required
                 value={adminPass}
                 onChange={e => setAdminPass(e.target.value)}
                 placeholder="ChaudharyAdmin@2026!"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-red-500"
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-red-500"
               />
             </div>
 
             <button
               type="submit"
               disabled={isLoggingIn}
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg text-xs transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50"
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg text-xs transition-colors shadow-lg shadow-slate-900/10 disabled:opacity-50"
             >
               {isLoggingIn ? 'AUTHENTICATING...' : 'SIGN IN TO ADMIN PANEL'}
             </button>
           </form>
 
-          <div className="pt-4 border-t border-slate-800 flex justify-between text-xs text-slate-500">
-            <button onClick={() => onNavigate('home')} className="hover:text-slate-300 flex items-center gap-1">
+          <div className="pt-4 border-t border-slate-200 flex justify-between text-xs text-slate-400">
+            <button onClick={() => onNavigate('home')} className="hover:text-slate-600 flex items-center gap-1">
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Back to Store</span>
             </button>
@@ -392,33 +525,33 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
   }
 
   return (
-    <div className="bg-slate-900 min-h-screen text-slate-100 flex flex-col">
+    <div className="bg-slate-50 min-h-screen text-slate-900 flex flex-col">
       {/* Top Admin Bar */}
-      <header className="bg-slate-950 border-b border-slate-800 py-3 px-6 flex items-center justify-between sticky top-0 z-30">
+      <header className="bg-white border-b border-slate-200 py-3.5 px-6 flex items-center justify-between sticky top-0 z-30 text-slate-800 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-red-600 flex items-center justify-center font-bold text-white">
+          <div className="w-8 h-8 rounded bg-red-600 flex items-center justify-center font-bold text-white shadow-md shadow-red-600/15">
             ⚡
           </div>
           <div>
-            <div className="font-extrabold text-sm text-white flex items-center gap-2">
+            <div className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
               <span>CHAUDHARY BATTERY ADMIN</span>
-              <span className="text-[10px] bg-red-950 text-red-400 border border-red-800 px-1.5 py-0.2 rounded font-mono">
+              <span className="text-[10px] bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.2 rounded font-mono font-bold">
                 RBAC ACTIVE
               </span>
             </div>
-            <div className="text-[10px] text-slate-400">F-10 Markaz, Islamabad, Pakistan</div>
+            <div className="text-[10px] text-slate-500">F-10 Markaz, Islamabad, Pakistan</div>
           </div>
         </div>
 
         <div className="flex items-center gap-4 text-xs">
           <div className="hidden sm:block text-right">
-            <div className="font-bold text-white">{user.firstName} ({user.role})</div>
-            <div className="text-slate-400 text-[10px]">{user.email}</div>
+            <div className="font-bold text-slate-900">{user.firstName} ({user.role})</div>
+            <div className="text-slate-500 text-[10px]">{user.email}</div>
           </div>
 
           <button
             onClick={() => onNavigate('home')}
-            className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-200 transition-colors flex items-center gap-1.5"
+            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors flex items-center gap-1.5 font-bold"
           >
             <span>View Public Store</span>
           </button>
@@ -428,7 +561,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
               await logout();
               onNavigate('home');
             }}
-            className="p-1.5 text-slate-400 hover:text-red-400 transition-colors"
+            className="p-1.5 text-slate-400 hover:text-red-600 transition-colors"
             title="Sign Out"
           >
             <LogOut className="w-4 h-4" />
@@ -439,11 +572,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
       {/* Main Container */}
       <div className="flex-1 flex flex-col md:flex-row">
         {/* Navigation Sidebar */}
-        <aside className="w-full md:w-64 bg-slate-950 border-r border-slate-800 p-4 space-y-1 flex-shrink-0 text-xs font-semibold">
+        <aside className="w-full md:w-64 bg-slate-50 border-r border-slate-200 p-4 space-y-1 flex-shrink-0 text-xs font-semibold">
           <button
             onClick={() => setActiveTab('dashboard')}
             className={`w-full text-left px-3.5 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors ${
-              activeTab === 'dashboard' ? 'bg-red-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+              activeTab === 'dashboard' ? 'bg-red-50 text-red-700 font-extrabold border border-red-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <LayoutDashboard className="w-4 h-4" />
@@ -453,7 +586,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           <button
             onClick={() => setActiveTab('orders')}
             className={`w-full text-left px-3.5 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors ${
-              activeTab === 'orders' ? 'bg-red-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+              activeTab === 'orders' ? 'bg-red-50 text-red-700 font-extrabold border border-red-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <ShoppingCart className="w-4 h-4" />
@@ -463,7 +596,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           <button
             onClick={() => setActiveTab('products')}
             className={`w-full text-left px-3.5 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors ${
-              activeTab === 'products' ? 'bg-red-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+              activeTab === 'products' ? 'bg-red-50 text-red-700 font-extrabold border border-red-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <Package className="w-4 h-4" />
@@ -473,7 +606,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           <button
             onClick={() => setActiveTab('inventory')}
             className={`w-full text-left px-3.5 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors ${
-              activeTab === 'inventory' ? 'bg-red-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+              activeTab === 'inventory' ? 'bg-red-50 text-red-700 font-extrabold border border-red-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <Boxes className="w-4 h-4" />
@@ -483,7 +616,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           <button
             onClick={() => setActiveTab('customers')}
             className={`w-full text-left px-3.5 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors ${
-              activeTab === 'customers' ? 'bg-red-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+              activeTab === 'customers' ? 'bg-red-50 text-red-700 font-extrabold border border-red-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <Users className="w-4 h-4" />
@@ -493,7 +626,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           <button
             onClick={() => setActiveTab('coupons')}
             className={`w-full text-left px-3.5 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors ${
-              activeTab === 'coupons' ? 'bg-red-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+              activeTab === 'coupons' ? 'bg-red-50 text-red-700 font-extrabold border border-red-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <Tag className="w-4 h-4" />
@@ -503,7 +636,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           <button
             onClick={() => setActiveTab('reviews')}
             className={`w-full text-left px-3.5 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors ${
-              activeTab === 'reviews' ? 'bg-red-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+              activeTab === 'reviews' ? 'bg-red-50 text-red-700 font-extrabold border border-red-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <MessageSquare className="w-4 h-4" />
@@ -513,7 +646,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           <button
             onClick={() => setActiveTab('audit')}
             className={`w-full text-left px-3.5 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors ${
-              activeTab === 'audit' ? 'bg-red-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+              activeTab === 'audit' ? 'bg-red-50 text-red-700 font-extrabold border border-red-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
@@ -523,7 +656,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           <button
             onClick={() => setActiveTab('settings')}
             className={`w-full text-left px-3.5 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors ${
-              activeTab === 'settings' ? 'bg-red-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+              activeTab === 'settings' ? 'bg-red-50 text-red-700 font-extrabold border border-red-100' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <Settings className="w-4 h-4" />
@@ -532,7 +665,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
         </aside>
 
         {/* Tab Area */}
-        <main className="flex-1 p-6 md:p-8 bg-slate-900 overflow-y-auto">
+        <main className="flex-1 p-6 md:p-8 bg-slate-100/60 overflow-y-auto">
           {/* 1. Dashboard View */}
           {activeTab === 'dashboard' && stats && (
             <div className="space-y-8">
@@ -543,66 +676,66 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
 
               {/* Metric KPI Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-slate-950 border border-slate-800 p-5 rounded-xl">
-                  <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+                <div className="bg-white border border-slate-200 shadow-sm p-5 rounded-xl">
+                  <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
                     <span>Total Paid Sales</span>
-                    <TrendingUp className="w-4 h-4 text-emerald-400" />
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
                   </div>
-                  <div className="text-2xl font-black font-mono text-white">
+                  <div className="text-2xl font-black font-mono text-slate-900">
                     Rs. {Number(stats.stats.totalRevenue).toLocaleString()}
                   </div>
-                  <div className="text-[10px] text-emerald-400 mt-1 font-semibold">Today: Rs. {Number(stats.stats.todayRevenue).toLocaleString()}</div>
+                  <div className="text-[10px] text-emerald-600 mt-1 font-semibold">Today: Rs. {Number(stats.stats.todayRevenue).toLocaleString()}</div>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 p-5 rounded-xl">
-                  <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+                <div className="bg-white border border-slate-200 shadow-sm p-5 rounded-xl">
+                  <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
                     <span>Total Orders</span>
-                    <ShoppingCart className="w-4 h-4 text-blue-400" />
+                    <ShoppingCart className="w-4 h-4 text-blue-600" />
                   </div>
-                  <div className="text-2xl font-black font-mono text-white">
+                  <div className="text-2xl font-black font-mono text-slate-900">
                     {stats.stats.totalOrders}
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1">{stats.stats.pendingOrders} Pending Verification</div>
+                  <div className="text-[10px] text-slate-500 mt-1">{stats.stats.pendingOrders} Pending Verification</div>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 p-5 rounded-xl">
-                  <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+                <div className="bg-white border border-slate-200 shadow-sm p-5 rounded-xl">
+                  <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
                     <span>Customers</span>
-                    <Users className="w-4 h-4 text-amber-400" />
+                    <Users className="w-4 h-4 text-amber-600" />
                   </div>
-                  <div className="text-2xl font-black font-mono text-white">
+                  <div className="text-2xl font-black font-mono text-slate-900">
                     {stats.stats.totalCustomers}
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1">Verified Accounts</div>
+                  <div className="text-[10px] text-slate-500 mt-1">Verified Accounts</div>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 p-5 rounded-xl">
-                  <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+                <div className="bg-white border border-slate-200 shadow-sm p-5 rounded-xl">
+                  <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
                     <span>Low Stock Alert</span>
                     <AlertTriangle className="w-4 h-4 text-red-500" />
                   </div>
-                  <div className="text-2xl font-black font-mono text-white">
+                  <div className="text-2xl font-black font-mono text-slate-900">
                     {stats.stats.lowStockCount}
                   </div>
-                  <div className="text-[10px] text-red-400 mt-1">{stats.stats.outOfStockCount} Out of Stock</div>
+                  <div className="text-[10px] text-red-600 mt-1">{stats.stats.outOfStockCount} Out of Stock</div>
                 </div>
               </div>
 
               {/* Top Products & Top Brands */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs">
                 {/* Top Selling Brands */}
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-                  <h3 className="font-bold text-sm text-white mb-3 flex items-center justify-between">
+                <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-5">
+                  <h3 className="font-bold text-sm text-slate-900 mb-3 flex items-center justify-between">
                     <span>Top Brand Market Share</span>
-                    <span className="text-[10px] text-slate-400 font-mono">F-10 Dispatches</span>
+                    <span className="text-[10px] text-slate-500 font-mono">F-10 Dispatches</span>
                   </h3>
                   <div className="space-y-3">
                     {stats.topBrands.map((b: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-900 rounded-lg">
-                        <span className="font-bold text-white">{b.name}</span>
+                      <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-lg">
+                        <span className="font-bold text-slate-900">{b.name}</span>
                         <div className="text-right">
-                          <span className="font-mono text-emerald-400 font-bold">Rs. {Number(b.revenue).toLocaleString()}</span>
-                          <span className="text-slate-400 text-[10px] block">{b.units_sold} units sold</span>
+                          <span className="font-mono text-emerald-700 font-bold">Rs. {Number(b.revenue).toLocaleString()}</span>
+                          <span className="text-slate-500 text-[10px] block">{b.units_sold} units sold</span>
                         </div>
                       </div>
                     ))}
@@ -610,19 +743,19 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                 </div>
 
                 {/* 7-Day Sales Trend */}
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-                  <h3 className="font-bold text-sm text-white mb-3">7-Day Revenue Velocity (Islamabad)</h3>
+                <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-5">
+                  <h3 className="font-bold text-sm text-slate-900 mb-3">7-Day Revenue Velocity (Islamabad)</h3>
                   <div className="space-y-2">
                     {stats.salesChart.map((s: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between p-2 bg-slate-900 rounded">
-                        <span className="font-bold text-slate-400 w-12">{s.day}</span>
-                        <div className="flex-1 mx-3 bg-slate-800 rounded-full h-2 overflow-hidden">
+                      <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 border border-slate-100 rounded">
+                        <span className="font-bold text-slate-500 w-12">{s.day}</span>
+                        <div className="flex-1 mx-3 bg-slate-200 rounded-full h-2 overflow-hidden">
                           <div
-                            className="bg-red-600 h-2 rounded-full"
+                            className="bg-red-650 h-2 rounded-full"
                             style={{ width: `${Math.min(100, (s.revenue / 350000) * 100)}%` }}
                           />
                         </div>
-                        <span className="font-mono font-bold text-white text-[11px]">
+                        <span className="font-mono font-bold text-slate-900 text-[11px]">
                           Rs. {s.revenue.toLocaleString()}
                         </span>
                       </div>
@@ -638,76 +771,235 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-xl font-black text-white tracking-tight">Order Management</h2>
-                  <p className="text-xs text-slate-400">Manage dispatch, tracking numbers, and view customer invoices.</p>
+                  <h2 className="text-xl font-black text-slate-900 tracking-tight">Order Management</h2>
+                  <p className="text-xs text-slate-500">Manage dispatch, assign tracking numbers, and view customer invoices.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={loadAdminData}
+                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 px-3.5 rounded-xl text-xs flex items-center gap-1.5 shadow"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Refresh Orders</span>
+                  </button>
                 </div>
               </div>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto text-xs">
-                <table className="w-full text-left divide-y divide-slate-800">
-                  <thead className="bg-slate-900 text-slate-400 uppercase tracking-wider font-bold">
-                    <tr>
-                      <th className="p-3.5">Order Ref</th>
-                      <th className="p-3.5">Customer</th>
-                      <th className="p-3.5">Amount</th>
-                      <th className="p-3.5">Payment</th>
-                      <th className="p-3.5">Order Status</th>
-                      <th className="p-3.5 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800">
-                    {orders.map(order => (
-                      <tr key={order.id} className="hover:bg-slate-900/50">
-                        <td className="p-3.5 font-mono font-bold text-white">
-                          #{order.order_number}
-                          <div className="text-[10px] text-slate-500 font-sans">
-                            {new Date(order.created_at).toLocaleDateString()}
+              <div className="space-y-4">
+                {orders.length === 0 ? (
+                  <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-500">
+                    <ShoppingCart className="w-10 h-10 mx-auto mb-3 text-slate-300" />
+                    <h3 className="font-bold text-slate-800 text-sm">No Orders Found</h3>
+                    <p className="text-xs mt-1">Orders placed on the website will immediately appear here.</p>
+                  </div>
+                ) : (
+                  orders.map(order => {
+                    const isExpanded = expandedOrderId === order.id;
+                    const address = order.shippingAddress || order.shipping_address;
+                    const currentTrackingVal = trackingInputs[order.id] !== undefined ? trackingInputs[order.id] : (order.tracking_number || '');
+
+                    return (
+                      <div key={order.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 text-xs">
+                        {/* Header Row */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono font-black text-slate-900 text-sm sm:text-base">
+                              #{order.order_number}
+                            </span>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                              order.order_status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
+                              order.order_status === 'shipped' ? 'bg-blue-100 text-blue-800' :
+                              order.order_status === 'cancelled' ? 'bg-rose-100 text-rose-800' :
+                              'bg-amber-100 text-amber-800'
+                            }`}>
+                              {order.order_status}
+                            </span>
+                            <span className="text-slate-400 text-[11px]">
+                              {new Date(order.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
                           </div>
-                        </td>
-                        <td className="p-3.5">
-                          <div className="font-bold text-white">{order.customer_name}</div>
-                          <div className="text-[10px] text-slate-400">{order.customer_phone}</div>
-                        </td>
-                        <td className="p-3.5 font-mono font-bold text-white">
-                          Rs. {Number(order.total_amount).toLocaleString()}
-                        </td>
-                        <td className="p-3.5">
-                          <span className="uppercase font-bold text-[10px] text-slate-300 block">
-                            {order.payment_method}
-                          </span>
-                          <span className={`text-[10px] font-bold uppercase ${
-                            order.payment_status === 'paid' ? 'text-emerald-400' : 'text-amber-400'
-                          }`}>
-                            {order.payment_status}
-                          </span>
-                        </td>
-                        <td className="p-3.5">
-                          <select
-                            value={order.order_status}
-                            onChange={e => handleUpdateOrderStatus(order.id, e.target.value)}
-                            className="bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs font-bold text-white focus:outline-none focus:border-red-500"
-                          >
-                            <option value="pending">Pending</option>
-                            <option value="confirmed">Confirmed</option>
-                            <option value="processing">Processing & Diagnostic</option>
-                            <option value="packed">Packed</option>
-                            <option value="shipped">Out for Roadside Delivery</option>
-                            <option value="delivered">Delivered & Installed</option>
-                            <option value="cancelled">Cancelled</option>
-                          </select>
-                        </td>
-                        <td className="p-3.5 text-right space-x-2">
-                          <button
-                            onClick={() => setSelectedInvoiceOrder(order)}
-                            className="bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-1 rounded font-bold text-[11px]"
-                          >
-                            Invoice
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              onClick={() => setSelectedInvoiceOrder(order)}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 border border-slate-200 transition-colors"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>View Invoice</span>
+                            </button>
+
+                            <button
+                              onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
+                              className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 shadow-sm transition-colors"
+                            >
+                              <span>{isExpanded ? 'Hide Details' : 'View Products & Client Details'}</span>
+                              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Summary Info Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-slate-600">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Customer</span>
+                            <div className="font-bold text-slate-900">{order.customer_name}</div>
+                            <div className="font-mono text-slate-500">{order.customer_phone}</div>
+                            <div className="text-slate-400 truncate">{order.customer_email}</div>
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Payment Method & Bank Details</span>
+                            <div className="font-mono font-bold text-slate-900 text-sm">
+                              Rs. {Number(order.total_amount).toLocaleString()}
+                            </div>
+                            <div className="uppercase font-extrabold text-blue-900 text-[11px] flex items-center gap-1">
+                              <CreditCard className="w-3.5 h-3.5 text-blue-600" />
+                              <span>{order.payment_method}</span>
+                            </div>
+                            <select
+                              value={order.payment_status}
+                              onChange={e => handleUpdateOrderStatus(order.id, order.order_status, undefined, undefined, e.target.value)}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-900 focus:outline-none focus:border-slate-900 mt-1"
+                            >
+                              <option value="pending">Payment Pending</option>
+                              <option value="paid">Payment Verified (Paid)</option>
+                              <option value="failed">Payment Failed</option>
+                              <option value="refunded">Refunded</option>
+                            </select>
+                            {(order.transaction_reference || order.transactionReference) && (
+                              <div className="text-[10px] font-mono text-slate-700 bg-slate-100 p-1.5 rounded border border-slate-200 mt-1 font-semibold break-all">
+                                {order.transaction_reference || order.transactionReference}
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Change Status</span>
+                            <select
+                              value={order.order_status}
+                              onChange={e => handleUpdateOrderStatus(order.id, e.target.value)}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-900 w-full mt-1"
+                            >
+                              <option value="pending">Pending</option>
+                              <option value="confirmed">Confirmed</option>
+                              <option value="processing">Processing & Diagnostic</option>
+                              <option value="packed">Packed with Stamped Warranty</option>
+                              <option value="shipped">Out for Roadside Delivery</option>
+                              <option value="delivered">Delivered & Installed</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Tracking / Consignment ID</span>
+                            <div className="flex gap-1.5 mt-1">
+                              <input
+                                type="text"
+                                value={currentTrackingVal}
+                                onChange={e => setTrackingInputs({ ...trackingInputs, [order.id]: e.target.value })}
+                                placeholder="e.g. TRK-849201"
+                                className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-mono w-full text-slate-900"
+                              />
+                              <button
+                                onClick={() => handleUpdateOrderStatus(order.id, order.order_status, currentTrackingVal)}
+                                disabled={updatingOrderId === order.id}
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-2.5 py-1 rounded-lg text-xs flex-shrink-0"
+                              >
+                                {updatingOrderId === order.id ? '...' : 'Save'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Expandable Full Order Details Panel */}
+                        {isExpanded && (
+                          <div className="pt-4 border-t border-slate-100 space-y-4">
+                            {/* 1. Client Delivery Form Details */}
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div>
+                                <h4 className="font-extrabold text-slate-900 text-xs mb-1.5 flex items-center gap-1.5">
+                                  <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                                  <span>Client Delivery Address & Form Details</span>
+                                </h4>
+                                <div className="space-y-1 text-slate-700">
+                                  <div><strong>Street Address:</strong> {address?.address_line1 || address?.addressLine1 || 'Shop/House Address'}</div>
+                                  <div><strong>City / Sector:</strong> {address?.city || 'Islamabad'}, {address?.province || 'ICT'}</div>
+                                  {order.shipping_notes && (
+                                    <div className="text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200 mt-1">
+                                      <strong>Client Delivery Note:</strong> {order.shipping_notes}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div>
+                                <h4 className="font-extrabold text-slate-900 text-xs mb-1.5 flex items-center gap-1.5">
+                                  <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Billing & Promotions Applied</span>
+                                </h4>
+                                <div className="space-y-1 text-slate-700">
+                                  <div><strong>Subtotal:</strong> Rs. {Number(order.subtotal || order.total_amount).toLocaleString()}</div>
+                                  <div><strong>Delivery Fee:</strong> {Number(order.shipping_amount) === 0 ? 'FREE' : `Rs. ${Number(order.shipping_amount).toLocaleString()}`}</div>
+                                  {Number(order.discount) > 0 && (
+                                    <div className="text-emerald-700 font-bold">
+                                      <strong>Coupon / Scrap Rebate:</strong> -Rs. {Number(order.discount).toLocaleString()} {order.coupon_code ? `(${order.coupon_code})` : ''}
+                                    </div>
+                                  )}
+                                  <div><strong>Grand Total:</strong> <span className="font-mono font-bold text-slate-900">Rs. {Number(order.total_amount).toLocaleString()}</span></div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 2. Itemized Product Line Items */}
+                            <div className="border border-slate-200 rounded-xl overflow-hidden">
+                              <div className="bg-slate-900 text-white font-bold px-4 py-2 text-xs flex justify-between">
+                                <span>Products in this Order ({order.items?.length || 1})</span>
+                                <span>Total: Rs. {Number(order.total_amount).toLocaleString()}</span>
+                              </div>
+                              <div className="divide-y divide-slate-100 bg-white">
+                                {(order.items && order.items.length > 0) ? (
+                                  order.items.map((it: any, idx: number) => (
+                                    <div key={idx} className="p-3.5 flex items-center justify-between gap-4 text-xs">
+                                      <div className="flex items-center gap-3">
+                                        <div className="w-12 h-12 bg-slate-100 rounded-lg p-1 flex items-center justify-center border border-slate-200 flex-shrink-0">
+                                          <img
+                                            src={it.product_image || it.image_url || '/uploads/battery_ags_gl65.jpg'}
+                                            alt=""
+                                            onError={(e) => { (e.target as HTMLImageElement).src = '/uploads/battery_ags_gl65.jpg'; }}
+                                            className="max-h-full max-w-full object-contain"
+                                          />
+                                        </div>
+                                        <div>
+                                          <div className="font-bold text-slate-900 text-sm">{it.product_title || it.title || 'Lead-Acid Battery'}</div>
+                                          <div className="text-slate-400 font-mono text-[11px]">
+                                            SKU: {it.sku} · {it.ah_capacity ? `${it.ah_capacity}Ah` : ''} · {it.voltage || '12V'} · {it.warranty_months || 12}M Warranty
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="text-right flex-shrink-0">
+                                        <div className="text-slate-500 font-mono text-[11px]">
+                                          Qty: <strong>{it.quantity}</strong> × Rs. {Number(it.unit_price).toLocaleString()}
+                                        </div>
+                                        <div className="font-mono font-bold text-slate-900 text-sm">
+                                          Rs. {Number(it.subtotal_price || (it.unit_price * it.quantity)).toLocaleString()}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="p-4 text-center text-slate-400">
+                                    No line items details found. Total: Rs. {Number(order.total_amount).toLocaleString()}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}
@@ -717,8 +1009,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-black text-white tracking-tight">Product Catalog</h2>
-                  <p className="text-xs text-slate-400">Add, edit, or adjust pricing of batteries in stock.</p>
+                  <h2 className="text-xl font-black text-slate-900 tracking-tight">Product Catalog</h2>
+                  <p className="text-xs text-slate-500">Add, edit, or adjust pricing of batteries in stock.</p>
                 </div>
                 <button
                   onClick={() => {
@@ -748,9 +1040,9 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                 </button>
               </div>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto text-xs">
-                <table className="w-full text-left divide-y divide-slate-800">
-                  <thead className="bg-slate-900 text-slate-400 uppercase tracking-wider font-bold">
+              <div className="bg-white border border-slate-200 shadow-sm rounded-xl overflow-x-auto text-xs">
+                <table className="w-full text-left divide-y divide-slate-200/80">
+                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-200">
                     <tr>
                       <th className="p-3.5">Product Title</th>
                       <th className="p-3.5">Brand</th>
@@ -760,26 +1052,36 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                       <th className="p-3.5 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800">
+                  <tbody className="divide-y divide-slate-100 bg-white">
                     {products.map(p => (
-                      <tr key={p.id} className="hover:bg-slate-900/50">
-                        <td className="p-3.5 font-bold text-white max-w-xs truncate">
+                      <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="p-3.5 font-bold text-slate-900 max-w-xs truncate">
                           {p.name}
                         </td>
-                        <td className="p-3.5 font-bold text-red-500 uppercase">{p.brand_name}</td>
-                        <td className="p-3.5 font-mono text-slate-400">{p.sku} ({p.ah_capacity}Ah)</td>
-                        <td className="p-3.5 font-mono font-bold text-white">Rs. {p.price.toLocaleString()}</td>
+                        <td className="p-3.5 font-bold text-red-600 uppercase">{p.brand_name}</td>
+                        <td className="p-3.5 font-mono text-slate-500">{p.sku} ({p.ah_capacity}Ah)</td>
+                        <td className="p-3.5 font-mono font-bold text-slate-900">Rs. {p.price.toLocaleString()}</td>
                         <td className="p-3.5">
-                          <span className={`font-mono font-bold ${p.stock_quantity <= p.low_stock_threshold ? 'text-red-400' : 'text-emerald-400'}`}>
+                          <span className={`font-mono font-bold ${p.stock_quantity <= p.low_stock_threshold ? 'text-red-650' : 'text-emerald-700'}`}>
                             {p.stock_quantity}
                           </span>
                         </td>
                         <td className="p-3.5 text-right space-x-2">
                           <button
-                            onClick={() => handleDeleteProduct(p.id)}
-                            className="text-slate-400 hover:text-red-500 p-1"
+                            onClick={() => handleEditProduct(p)}
+                            className="bg-slate-100 hover:bg-slate-200 text-blue-600 font-bold px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] inline-flex items-center gap-1 transition-colors"
+                            title="Edit battery specs, price and stock"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Edit className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteProduct(p.id)}
+                            className="bg-slate-100 hover:bg-red-50 text-red-600 font-bold px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] inline-flex items-center gap-1 transition-colors"
+                            title="Delete product"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete</span>
                           </button>
                         </td>
                       </tr>
@@ -794,13 +1096,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           {activeTab === 'inventory' && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-black text-white tracking-tight">Real-Time Inventory & Audit Logs</h2>
-                <p className="text-xs text-slate-400">Track current stock in F-10 Markaz warehouse and audit manual adjustments.</p>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Real-Time Inventory & Audit Logs</h2>
+                <p className="text-xs text-slate-500">Track current stock in F-10 Markaz warehouse and audit manual adjustments.</p>
               </div>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto text-xs">
-                <table className="w-full text-left divide-y divide-slate-800">
-                  <thead className="bg-slate-900 text-slate-400 uppercase tracking-wider font-bold">
+              <div className="bg-white border border-slate-200 shadow-sm rounded-xl overflow-x-auto text-xs">
+                <table className="w-full text-left divide-y divide-slate-200">
+                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-200">
                     <tr>
                       <th className="p-3.5">Product</th>
                       <th className="p-3.5">Brand</th>
@@ -810,18 +1112,18 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                       <th className="p-3.5 text-right">Adjustment</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800">
+                  <tbody className="divide-y divide-slate-100 bg-white">
                     {inventoryItems.map((it: any) => (
-                      <tr key={it.product_id} className="hover:bg-slate-900/50">
-                        <td className="p-3.5 font-bold text-white">{it.product_name}</td>
-                        <td className="p-3.5 text-slate-300 font-bold uppercase">{it.brand_name}</td>
-                        <td className="p-3.5 font-mono text-slate-400">{it.ah_capacity} Ah</td>
-                        <td className="p-3.5 font-mono font-bold text-white">
-                          <span className={it.current_stock <= it.low_stock_threshold ? 'text-red-400' : 'text-emerald-400'}>
+                      <tr key={it.product_id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="p-3.5 font-bold text-slate-900">{it.product_name}</td>
+                        <td className="p-3.5 text-slate-700 font-bold uppercase">{it.brand_name}</td>
+                        <td className="p-3.5 font-mono text-slate-500">{it.ah_capacity} Ah</td>
+                        <td className="p-3.5 font-mono font-bold">
+                          <span className={it.current_stock <= it.low_stock_threshold ? 'text-red-600' : 'text-emerald-700'}>
                             {it.current_stock}
                           </span>
                         </td>
-                        <td className="p-3.5 font-mono text-slate-400">{it.low_stock_threshold}</td>
+                        <td className="p-3.5 font-mono text-slate-500">{it.low_stock_threshold}</td>
                         <td className="p-3.5 text-right">
                           <button
                             onClick={() => {
@@ -829,7 +1131,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                               setStockChangeDelta(0);
                               setStockModalOpen(true);
                             }}
-                            className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-3 py-1 rounded text-[11px]"
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 font-bold px-3 py-1 rounded-lg text-[11px] transition-colors"
                           >
                             Adjust Stock
                           </button>
@@ -841,20 +1143,20 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
               </div>
 
               {/* Adjustment Logs */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-                <h3 className="font-bold text-sm text-white mb-3">Recent Stock Transaction Log</h3>
+              <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-5">
+                <h3 className="font-bold text-sm text-slate-900 mb-3">Recent Stock Transaction Log</h3>
                 <div className="space-y-2 text-xs">
                   {inventoryLogs.slice(0, 10).map((log: any, idx: number) => (
-                    <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-900 rounded-lg">
+                    <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-lg">
                       <div>
-                        <span className="font-bold text-white">{log.product_name}</span>
-                        <span className="text-slate-400 ml-2">({log.reason})</span>
+                        <span className="font-bold text-slate-900">{log.product_name}</span>
+                        <span className="text-slate-500 ml-2">({log.reason})</span>
                       </div>
                       <div className="font-mono text-right">
-                        <span className={`font-bold ${log.quantity_changed > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        <span className={`font-bold ${log.quantity_changed > 0 ? 'text-emerald-700' : 'text-red-600'}`}>
                           {log.quantity_changed > 0 ? `+${log.quantity_changed}` : log.quantity_changed}
                         </span>
-                        <span className="text-[10px] text-slate-500 block">{new Date(log.created_at).toLocaleTimeString()}</span>
+                        <span className="text-[10px] text-slate-400 block">{new Date(log.created_at).toLocaleTimeString()}</span>
                       </div>
                     </div>
                   ))}
@@ -867,13 +1169,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           {activeTab === 'customers' && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-black text-white tracking-tight">Customer Directory</h2>
-                <p className="text-xs text-slate-400">View customer accounts, registration dates, and purchase totals.</p>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Customer Directory</h2>
+                <p className="text-xs text-slate-500">View customer accounts, registration dates, and purchase totals.</p>
               </div>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto text-xs">
-                <table className="w-full text-left divide-y divide-slate-800">
-                  <thead className="bg-slate-900 text-slate-400 uppercase tracking-wider font-bold">
+              <div className="bg-white border border-slate-200 shadow-sm rounded-xl overflow-x-auto text-xs">
+                <table className="w-full text-left divide-y divide-slate-200">
+                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-200">
                     <tr>
                       <th className="p-3.5">Customer Name</th>
                       <th className="p-3.5">Email</th>
@@ -883,20 +1185,43 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                       <th className="p-3.5">Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800">
+                  <tbody className="divide-y divide-slate-100 bg-white">
                     {customers.map((c: any) => (
-                      <tr key={c.id} className="hover:bg-slate-900/50">
-                        <td className="p-3.5 font-bold text-white">{c.first_name} {c.last_name}</td>
-                        <td className="p-3.5 text-slate-400 font-mono">{c.email}</td>
-                        <td className="p-3.5 text-slate-400 font-mono">{c.phone || 'N/A'}</td>
-                        <td className="p-3.5 font-mono font-bold text-white">{c.orders_count}</td>
-                        <td className="p-3.5 font-mono font-bold text-emerald-400">Rs. {Number(c.total_spent).toLocaleString()}</td>
+                      <tr key={c.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="p-3.5 font-bold text-slate-900">{c.first_name} {c.last_name}</td>
+                        <td className="p-3.5 text-slate-500 font-mono">{c.email}</td>
+                        <td className="p-3.5 text-slate-500 font-mono">{c.phone || 'N/A'}</td>
+                        <td className="p-3.5 font-mono font-bold text-slate-900">{c.orders_count}</td>
+                        <td className="p-3.5 font-mono font-bold text-emerald-700">Rs. {Number(c.total_spent).toLocaleString()}</td>
                         <td className="p-3.5">
-                          <span className={`px-2 py-0.5 rounded font-bold text-[10px] uppercase ${
-                            c.status === 'active' ? 'bg-emerald-950 text-emerald-400' : 'bg-rose-950 text-rose-400'
-                          }`}>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const token = localStorage.getItem('cbf10_token');
+                                const nextStatus = c.status === 'active' ? 'disabled' : 'active';
+                                await fetch(`/api/admin/customers/${c.id}/status`, {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                                  },
+                                  credentials: 'include',
+                                  body: JSON.stringify({ status: nextStatus })
+                                });
+                                loadAdminData();
+                              } catch (e) {
+                                console.error(e);
+                              }
+                            }}
+                            className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase transition-all ${
+                              c.status === 'active'
+                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                            }`}
+                            title="Click to toggle customer account access"
+                          >
                             {c.status}
-                          </span>
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -911,12 +1236,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-black text-white tracking-tight">Discount Coupons & Vouchers</h2>
-                  <p className="text-xs text-slate-400">Create promotional codes for Islamabad residents and solar customers.</p>
+                  <h2 className="text-xl font-black text-slate-900 tracking-tight">Discount Coupons & Vouchers</h2>
+                  <p className="text-xs text-slate-500">Create promotional codes for Islamabad residents and solar customers.</p>
                 </div>
                 <button
                   onClick={() => setCouponModalOpen(true)}
-                  className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5"
+                  className="bg-red-650 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow-sm"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Create Coupon</span>
@@ -925,15 +1250,15 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                 {coupons.map(cp => (
-                  <div key={cp.id} className="bg-slate-950 border border-slate-800 p-5 rounded-xl space-y-2">
+                  <div key={cp.id} className="bg-white border border-slate-200 p-5 rounded-xl space-y-2 shadow-sm">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono text-base font-extrabold text-red-400">{cp.code}</span>
-                      <span className="bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded text-[10px] uppercase">
+                      <span className="font-mono text-base font-extrabold text-red-600">{cp.code}</span>
+                      <span className="bg-slate-100 text-slate-800 font-bold px-2 py-0.5 rounded text-[10px] uppercase border border-slate-200">
                         {cp.discount_type === 'percentage' ? `${cp.discount_value}%` : `Rs. ${cp.discount_value}`}
                       </span>
                     </div>
-                    <p className="text-slate-400 text-xs">{cp.description}</p>
-                    <div className="text-[10px] text-slate-500 pt-2 border-t border-slate-800 flex justify-between">
+                    <p className="text-slate-600 text-xs">{cp.description}</p>
+                    <div className="text-[10px] text-slate-500 pt-2 border-t border-slate-100 flex justify-between">
                       <span>Min Order: Rs. {cp.min_order_amount.toLocaleString()}</span>
                       <span>Used: {cp.times_used} times</span>
                     </div>
@@ -947,22 +1272,22 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           {activeTab === 'reviews' && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-black text-white tracking-tight">Review Moderation</h2>
-                <p className="text-xs text-slate-400">Approve, reject, or feature verified purchaser battery reviews.</p>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Review Moderation</h2>
+                <p className="text-xs text-slate-500">Approve, reject, or feature verified purchaser battery reviews.</p>
               </div>
 
               <div className="space-y-3 text-xs">
                 {reviews.map((r: any) => (
-                  <div key={r.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex items-start justify-between gap-4">
+                  <div key={r.id} className="bg-white border border-slate-200 p-4 rounded-xl flex items-start justify-between gap-4 shadow-sm">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-bold text-white">{r.customer_name}</span>
-                        <span className="text-slate-500">on</span>
-                        <span className="text-red-400 font-semibold">{r.product_name}</span>
-                        <span className="text-amber-400 font-mono font-bold">★ {r.rating}/5</span>
+                        <span className="font-bold text-slate-900">{r.customer_name}</span>
+                        <span className="text-slate-400">on</span>
+                        <span className="text-red-650 font-semibold">{r.product_name}</span>
+                        <span className="text-amber-500 font-mono font-bold">★ {r.rating}/5</span>
                       </div>
-                      <h4 className="font-bold text-slate-200">{r.title}</h4>
-                      <p className="text-slate-400 text-xs mt-1">"{r.comment}"</p>
+                      <h4 className="font-bold text-slate-800">{r.title}</h4>
+                      <p className="text-slate-600 text-xs mt-1">"{r.comment}"</p>
                     </div>
 
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -970,20 +1295,20 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                         <>
                           <button
                             onClick={() => handleUpdateReviewStatus(r.id, 'approved')}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1 rounded"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1 rounded-lg text-[11px]"
                           >
                             Approve
                           </button>
                           <button
                             onClick={() => handleUpdateReviewStatus(r.id, 'rejected')}
-                            className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1 rounded"
+                            className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1 rounded-lg text-[11px]"
                           >
                             Reject
                           </button>
                         </>
                       )}
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        r.status === 'approved' ? 'bg-emerald-950 text-emerald-400' : 'bg-amber-950 text-amber-400'
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase ${
+                        r.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' : 'bg-amber-50 text-amber-700 border border-amber-150'
                       }`}>
                         {r.status}
                       </span>
@@ -998,13 +1323,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
           {activeTab === 'audit' && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-black text-white tracking-tight">Security Audit Logs (Section 56)</h2>
-                <p className="text-xs text-slate-400">Immutable trail of administrative logins, price edits, stock changes, and refunds.</p>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Security Audit Logs (Section 56)</h2>
+                <p className="text-xs text-slate-500">Immutable trail of administrative logins, price edits, stock changes, and refunds.</p>
               </div>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto text-xs">
-                <table className="w-full text-left divide-y divide-slate-800">
-                  <thead className="bg-slate-900 text-slate-400 uppercase tracking-wider font-bold">
+              <div className="bg-white border border-slate-200 shadow-sm rounded-xl overflow-x-auto text-xs">
+                <table className="w-full text-left divide-y divide-slate-200">
+                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-200">
                     <tr>
                       <th className="p-3">Timestamp</th>
                       <th className="p-3">Admin</th>
@@ -1013,16 +1338,16 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                       <th className="p-3">Details</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800">
+                  <tbody className="divide-y divide-slate-100 bg-white">
                     {auditLogs.map((log: any) => (
-                      <tr key={log.id} className="hover:bg-slate-900/50">
+                      <tr key={log.id} className="hover:bg-slate-50/70 transition-colors">
                         <td className="p-3 font-mono text-slate-500 whitespace-nowrap">
                           {new Date(log.created_at).toLocaleString()}
                         </td>
-                        <td className="p-3 font-bold text-white">{log.admin_email}</td>
-                        <td className="p-3 font-mono text-red-400 font-bold">{log.action}</td>
-                        <td className="p-3 font-mono text-slate-400">{log.target_type}:{log.target_id}</td>
-                        <td className="p-3 text-slate-300">{log.details}</td>
+                        <td className="p-3 font-bold text-slate-800">{log.admin_email}</td>
+                        <td className="p-3 font-mono text-red-600 font-bold">{log.action}</td>
+                        <td className="p-3 font-mono text-slate-500">{log.target_type}:{log.target_id}</td>
+                        <td className="p-3 text-slate-600">{log.details}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1033,79 +1358,101 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
 
           {/* 9. Settings */}
           {activeTab === 'settings' && (
-            <div className="space-y-6 max-w-2xl text-xs">
+            <form onSubmit={handleSaveSettings} className="space-y-6 max-w-2xl text-xs">
               <div>
-                <h2 className="text-xl font-black text-white tracking-tight">Store & Gateway Configuration</h2>
-                <p className="text-xs text-slate-400">Settings are persisted to the database and affect public store rules.</p>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Store & Gateway Configuration</h2>
+                <p className="text-xs text-slate-500">Settings are persisted to the database and affect public store rules.</p>
               </div>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 space-y-4">
-                <h3 className="font-bold text-sm text-white border-b border-slate-800 pb-2">Business Information</h3>
+              {settingsSuccess && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-xl font-bold shadow-sm">
+                  {settingsSuccess}
+                </div>
+              )}
+
+              <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-6 space-y-4">
+                <h3 className="font-bold text-sm text-slate-900 border-b border-slate-100 pb-2">Business Information</h3>
 
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">Business Name</label>
+                  <label className="block text-slate-700 font-bold mb-1">Business Name</label>
                   <input
                     type="text"
+                    required
                     value={settings.business_name || 'Chaudhary Battery And UPS F10'}
-                    readOnly
-                    className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white"
+                    onChange={e => setSettings({ ...settings, business_name: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-slate-900 focus:outline-none focus:border-red-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">Physical Store Address</label>
+                  <label className="block text-slate-700 font-bold mb-1">Physical Store Address</label>
                   <input
                     type="text"
+                    required
                     value={settings.business_address || 'Shop # 14-16, Capital Trade Centre, F-10 Markaz, Islamabad'}
-                    readOnly
-                    className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white"
+                    onChange={e => setSettings({ ...settings, business_address: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-slate-900 focus:outline-none focus:border-red-500"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-slate-300 font-bold mb-1">Store Phone</label>
+                    <label className="block text-slate-700 font-bold mb-1">Store Phone</label>
                     <input
                       type="text"
+                      required
                       value={settings.business_phone || '+92 51 2212345'}
-                      readOnly
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white"
+                      onChange={e => setSettings({ ...settings, business_phone: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-slate-900 focus:outline-none focus:border-red-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-300 font-bold mb-1">Store WhatsApp</label>
+                    <label className="block text-slate-700 font-bold mb-1">Store WhatsApp</label>
                     <input
                       type="text"
+                      required
                       value={settings.business_whatsapp || '+92 300 5551234'}
-                      readOnly
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white"
+                      onChange={e => setSettings({ ...settings, business_whatsapp: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-slate-900 focus:outline-none focus:border-red-500"
                     />
                   </div>
                 </div>
 
-                <h3 className="font-bold text-sm text-white border-b border-slate-800 pb-2 pt-4">Bank Transfer Coordinates</h3>
+                <h3 className="font-bold text-sm text-slate-900 border-b border-slate-100 pb-2 pt-4">Bank Transfer Coordinates</h3>
 
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">Bank Name & Branch</label>
+                  <label className="block text-slate-700 font-bold mb-1">Bank Name & Branch</label>
                   <input
                     type="text"
+                    required
                     value={settings.bank_name || 'Meezan Bank Limited / F-10 Markaz Branch'}
-                    readOnly
-                    className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white"
+                    onChange={e => setSettings({ ...settings, bank_name: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-slate-900 focus:outline-none focus:border-red-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">Account Title & IBAN</label>
+                  <label className="block text-slate-700 font-bold mb-1">Account Title & IBAN</label>
                   <input
                     type="text"
+                    required
                     value={settings.bank_iban || 'PK42MEZN0000100123456789'}
-                    readOnly
-                    className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 font-mono text-emerald-400 font-bold"
+                    onChange={e => setSettings({ ...settings, bank_iban: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 font-mono text-emerald-700 font-bold focus:outline-none focus:border-red-500"
                   />
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isSavingSettings}
+                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md active:scale-95 transition-all text-xs"
+                  >
+                    {isSavingSettings ? 'Saving Configurations...' : 'SAVE STORE CONFIGURATION'}
+                  </button>
                 </div>
               </div>
-            </div>
+            </form>
           )}
         </main>
       </div>
@@ -1189,7 +1536,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                     type="text"
                     required
                     value={productForm.sku}
-                    onChange={e => setProductForm({ ...productForm, sku: e.target.value })}
+                    onChange={e => setProductForm({ ...productForm, sku: e.target.value, isAutoSku: false })}
                     placeholder="AGS-GL-75"
                     className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white font-mono"
                   />
@@ -1272,6 +1619,59 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onNavigate }) => {
                     className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white font-mono"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">Product Image</label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    value={productForm.imageUrl || ''}
+                    onChange={e => setProductForm({ ...productForm, imageUrl: e.target.value })}
+                    placeholder="e.g. /uploads/image.jpg"
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white font-mono"
+                  />
+                  <label className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold px-3 py-2 rounded border border-slate-700 whitespace-nowrap text-center transition-colors">
+                    Upload File
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        
+                        const formData = new FormData();
+                        formData.append('image', file);
+                        
+                        try {
+                          const token = localStorage.getItem('cbf10_token');
+                          const res = await fetch('/api/upload', {
+                            method: 'POST',
+                            headers: {
+                              ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                            },
+                            body: formData
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            setProductForm((prev: any) => ({ ...prev, imageUrl: data.url }));
+                          } else {
+                            alert(data.error || 'Failed to upload image.');
+                          }
+                        } catch (err) {
+                          console.error(err);
+                          alert('Upload failed. Please check network.');
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+                {productForm.imageUrl && (
+                  <div className="mt-2 bg-slate-900/60 p-2 rounded border border-slate-800 flex justify-center">
+                    <img src={productForm.imageUrl} alt="Preview" className="max-h-24 object-contain rounded" />
+                  </div>
+                )}
               </div>
 
               <div>

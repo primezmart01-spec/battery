@@ -64,6 +64,10 @@ export async function getDb(): Promise<Database> {
       const fileBuffer = fs.readFileSync(DB_PATH);
       dbInstance = new SQL.Database(fileBuffer);
       initTables(dbInstance);
+      // Run category images sync
+      dbInstance.run("UPDATE categories SET image_url = '/uploads/ups_battery_category.jpg' WHERE id = 'cat_ups' OR slug = 'ups-batteries';");
+      dbInstance.run("UPDATE categories SET image_url = '/uploads/solar_battery_category.jpg' WHERE id = 'cat_solar' OR slug = 'solar-batteries';");
+      saveDatabase();
       return dbInstance;
     } catch (err) {
       console.warn('Existing database corrupted or invalid, creating new:', err);
@@ -804,7 +808,7 @@ async function seedInitialData(db: Database): Promise<void> {
       name: 'UPS Batteries',
       slug: 'ups-batteries',
       description: 'Heavy duty deep cycle and semi-tubular batteries engineered for load-shedding backup and inverters.',
-      image_url: 'https://images.unsplash.com/photo-1558441719-8b459c86f6c0?auto=format&fit=crop&w=600&q=80',
+      image_url: '/uploads/ups_battery_category.jpg',
       order: 2
     },
     {
@@ -812,7 +816,7 @@ async function seedInitialData(db: Database): Promise<void> {
       name: 'Solar Batteries',
       slug: 'solar-batteries',
       description: 'Long-life tubular deep cycle batteries specifically designed for solar photovoltaic energy storage.',
-      image_url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=600&q=80',
+      image_url: '/uploads/solar_battery_category.jpg',
       order: 3
     },
     {
@@ -866,6 +870,8 @@ async function seedInitialData(db: Database): Promise<void> {
         now
       ]
     );
+    // Always sync image_url for categories
+    db.run('UPDATE categories SET image_url = ? WHERE id = ?;', [c.image_url, c.id]);
   }
 
   // 5. Vehicles (Pakistani Automotive Master List)

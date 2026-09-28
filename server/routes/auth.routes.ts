@@ -6,6 +6,7 @@ import { query, queryOne, run, transaction } from '../db.js';
 import {
   signToken,
   requireAuth,
+  authenticateOptional,
   AuthenticatedRequest,
   createRateLimiter,
   logAuditAction

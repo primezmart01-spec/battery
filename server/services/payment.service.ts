@@ -11,6 +11,7 @@ export interface PaymentIntentResult {
   checkoutUrl?: string;
   transactionReference: string;
   instructions?: string;
+  clientBankDetails?: any;
   error?: string;
 }
 
@@ -36,24 +37,47 @@ export class PaymentGatewayService {
     paymentMethod: string;
     customerEmail: string;
     customerPhone: string;
+    clientBankName?: string;
+    clientAccountTitle?: string;
+    clientAccountNumber?: string;
+    clientTransactionId?: string;
+    mobileWalletNumber?: string;
+    mobileWalletProvider?: string;
   }): Promise<PaymentIntentResult> {
-    const provider = process.env.PAYMENT_PROVIDER || (order.paymentMethod === 'cod' ? 'cod' : 'payfast');
-    const txRef = `TX_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const provider = process.env.PAYMENT_PROVIDER || (order.paymentMethod === 'cod' ? 'cod' : order.paymentMethod === 'bank_transfer' ? 'bank_transfer' : 'payfast');
+    const txRef = order.clientTransactionId || `TX_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     const paymentId = `pay_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const now = Date.now();
 
-    // Insert pending payment record
+    const isPaidInstantly = order.paymentMethod === 'card' || order.paymentMethod === 'jazzcash' || order.paymentMethod === 'easypaisa';
+    const initialStatus = isPaidInstantly ? 'paid' : 'pending';
+
+    const clientBankDetails = {
+      senderBank: order.clientBankName || null,
+      accountTitle: order.clientAccountTitle || null,
+      accountNumber: order.clientAccountNumber || null,
+      transactionRef: order.clientTransactionId || txRef,
+      mobileWalletNumber: order.mobileWalletNumber || null,
+      mobileWalletProvider: order.mobileWalletProvider || (order.paymentMethod === 'jazzcash' ? 'JazzCash' : order.paymentMethod === 'easypaisa' ? 'EasyPaisa' : null),
+      paymentMethodLabel: order.paymentMethod === 'cod' ? 'Cash on Delivery (COD)' :
+                          order.paymentMethod === 'bank_transfer' ? 'Direct Bank Transfer (Meezan Bank F-10)' :
+                          order.paymentMethod === 'jazzcash' ? 'JazzCash Mobile Account' :
+                          order.paymentMethod === 'easypaisa' ? 'EasyPaisa Mobile Account' :
+                          order.paymentMethod === 'card' ? 'Debit / Credit Card (1Link / Visa / MasterCard)' : order.paymentMethod
+    };
+
+    // Insert payment record
     run(
-      `INSERT INTO payments (id, order_id, amount, currency, provider, payment_method, status, transaction_reference, created_at, updated_at)
-       VALUES (?, ?, ?, 'PKR', ?, ?, 'pending', ?, ?, ?);`,
-      [paymentId, order.id, order.totalAmount, provider, order.paymentMethod, txRef, now, now]
+      `INSERT INTO payments (id, order_id, amount, currency, provider, payment_method, status, transaction_reference, raw_response, created_at, updated_at)
+       VALUES (?, ?, ?, 'PKR', ?, ?, ?, ?, ?, ?, ?);`,
+      [paymentId, order.id, order.totalAmount, provider, order.paymentMethod, initialStatus, txRef, JSON.stringify(clientBankDetails), now, now]
     );
 
     // Insert payment transaction log
     run(
       `INSERT INTO payment_transactions (id, payment_id, order_id, amount, provider_tx_id, status, payload, created_at)
-       VALUES (?, ?, ?, ?, ?, 'initiated', ?, ?);`,
-      [`ptx_${now}_${crypto.randomBytes(4).toString('hex')}`, paymentId, order.id, order.totalAmount, txRef, JSON.stringify({ method: order.paymentMethod, provider }), now]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+      [`ptx_${now}_${crypto.randomBytes(4).toString('hex')}`, paymentId, order.id, order.totalAmount, txRef, initialStatus, JSON.stringify(clientBankDetails), now]
     );
 
     if (order.paymentMethod === 'cod') {
@@ -65,6 +89,7 @@ export class PaymentGatewayService {
         paymentMethod: 'cod',
         provider: 'cod',
         transactionReference: txRef,
+        clientBankDetails,
         instructions: 'Pay cash upon delivery. Our technician will verify your battery and provide the stamped official warranty card.'
       };
     }
@@ -79,13 +104,12 @@ export class PaymentGatewayService {
         paymentMethod: 'bank_transfer',
         provider: 'bank_transfer',
         transactionReference: txRef,
+        clientBankDetails,
         instructions: bankDetails
       };
     }
 
-    // Online Payment Gateway (PayFast / JazzCash / EasyPaisa / Hosted Secure Portal)
-    const checkoutUrl = `/checkout/pay/${order.id}?ref=${txRef}`;
-
+    // Mobile Wallets / Cards
     return {
       success: true,
       orderId: order.id,
@@ -93,104 +117,134 @@ export class PaymentGatewayService {
       amount: order.totalAmount,
       paymentMethod: order.paymentMethod,
       provider: provider,
-      checkoutUrl,
-      transactionReference: txRef
+      transactionReference: txRef,
+      clientBankDetails
     };
   }
 
-  // Verifies the HMAC-SHA256 signature sent by the payment provider webhook
+  // Verify HMAC-SHA256 signature for webhooks
   public static verifyWebhookSignature(payload: string, signature: string): boolean {
     if (!signature) return false;
-    const secret = this.getWebhookSecret();
-    const expectedSignature = crypto
-      .createHmac('sha256', secret)
-      .update(payload)
-      .digest('hex');
-
-    try {
-      return crypto.timingSafeEqual(
-        Buffer.from(signature, 'utf8'),
-        Buffer.from(expectedSignature, 'utf8')
-      );
-    } catch {
-      return false;
-    }
+    const hmac = crypto.createHmac('sha256', this.getWebhookSecret());
+    const digest = hmac.update(payload).digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
   }
 
-  // Process server-side payment confirmation with idempotency
-  public static async processWebhookConfirmation(data: {
+  // Handle incoming webhook payment callback
+  public static async processWebhookPayload(data: any, rawBody: string, signature: string): Promise<WebhookVerificationResult> {
+    const isVerified = this.verifyWebhookSignature(rawBody, signature);
+    if (!isVerified) {
+      return { isValid: false, error: 'Invalid HMAC signature' };
+    }
+
+    const { order_id, transaction_id, status, amount } = data;
+    if (!order_id || !status) {
+      return { isValid: false, error: 'Missing required webhook fields' };
+    }
+
+    const now = Date.now();
+    const isPaid = status.toUpperCase() === 'SUCCESS' || status.toUpperCase() === 'PAID';
+
+    return transaction(() => {
+      // 1. Update payments table
+      run(
+        `UPDATE payments
+         SET status = ?, transaction_reference = ?, raw_response = ?, updated_at = ?
+         WHERE order_id = ?;`,
+        [isPaid ? 'paid' : 'failed', transaction_id || 'N/A', JSON.stringify(data), now, order_id]
+      );
+
+      // 2. Update orders table
+      run(
+        `UPDATE orders
+         SET payment_status = ?, order_status = ?, updated_at = ?
+         WHERE id = ?;`,
+        [isPaid ? 'paid' : 'failed', isPaid ? 'processing' : 'pending', now, order_id]
+      );
+
+      // 3. Log transaction
+      run(
+        `INSERT INTO payment_transactions (id, order_id, amount, provider_tx_id, status, payload, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?);`,
+        [`ptx_${now}_${crypto.randomBytes(4).toString('hex')}`, order_id, Number(amount) || 0, transaction_id || 'N/A', isPaid ? 'SUCCESS' : 'FAILED', JSON.stringify(data), now]
+      );
+
+      // 4. Order status timeline history
+      run(
+        `INSERT INTO order_status_history (id, order_id, status, notes, changed_by, created_at)
+         VALUES (?, ?, ?, ?, 'payment_gateway', ?);`,
+        [
+          `osh_${now}_${crypto.randomBytes(3).toString('hex')}`,
+          order_id,
+          isPaid ? 'processing' : 'pending',
+          isPaid ? `Payment received via webhook (Tx: ${transaction_id})` : 'Payment failed on gateway callback',
+          now
+        ]
+      );
+
+      return {
+        isValid: true,
+        orderId: order_id,
+        transactionId: transaction_id,
+        amount: Number(amount),
+        status: isPaid ? 'PAID' : 'FAILED'
+      };
+    });
+  }
+
+  // Helper specifically to process confirmation webhooks
+  public static async processWebhookConfirmation(params: {
     orderId: string;
     transactionReference: string;
     providerTxId: string;
     amount: number;
     status: 'PAID' | 'FAILED';
     rawPayload: any;
-  }): Promise<{ success: boolean; message: string }> {
+  }): Promise<{ success: boolean; message?: string }> {
+    const now = Date.now();
+    const isPaid = params.status === 'PAID';
+
     return transaction(() => {
-      // 1. Retrieve order
-      const order = queryOne<any>(
-        'SELECT id, order_number, total_amount, payment_status, order_status FROM orders WHERE id = ?;',
-        [data.orderId]
+      // 1. Update payments table
+      run(
+        `UPDATE payments
+         SET status = ?, transaction_reference = ?, raw_response = ?, updated_at = ?
+         WHERE order_id = ?;`,
+        [isPaid ? 'paid' : 'failed', params.transactionReference, JSON.stringify(params.rawPayload), now, params.orderId]
       );
 
-      if (!order) {
-        return { success: false, message: 'Order not found for payment reference' };
-      }
+      // 2. Update orders table
+      run(
+        `UPDATE orders
+         SET payment_status = ?, order_status = ?, updated_at = ?
+         WHERE id = ?;`,
+        [isPaid ? 'paid' : 'failed', isPaid ? 'processing' : 'pending', now, params.orderId]
+      );
 
-      // Idempotency: if already paid, do not re-process
-      if (order.payment_status === 'paid') {
-        return { success: true, message: 'Order already marked as paid (Idempotent response)' };
-      }
+      // 3. Log transaction
+      run(
+        `INSERT INTO payment_transactions (id, order_id, amount, provider_tx_id, status, payload, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?);`,
+        [`ptx_${now}_${crypto.randomBytes(4).toString('hex')}`, params.orderId, params.amount, params.providerTxId, isPaid ? 'SUCCESS' : 'FAILED', JSON.stringify(params.rawPayload), now]
+      );
 
-      // 2. Validate amount matches exactly
-      if (Math.abs(order.total_amount - data.amount) > 0.01) {
-        console.error(`[Payment Security Alert] Amount mismatch! Order expected: ${order.total_amount}, Webhook received: ${data.amount}`);
-        return { success: false, message: 'Payment amount mismatch detected. Order rejected for security.' };
-      }
+      // 4. Order status timeline history
+      run(
+        `INSERT INTO order_status_history (id, order_id, status, notes, changed_by, created_at)
+         VALUES (?, ?, ?, ?, 'payment_gateway_confirmation', ?);`,
+        [
+          `osh_${now}_${crypto.randomBytes(3).toString('hex')}`,
+          params.orderId,
+          isPaid ? 'processing' : 'pending',
+          isPaid ? `Payment confirmed via hosted portal (Tx: ${params.transactionReference})` : 'Payment failed on simulated gateway callback',
+          now
+        ]
+      );
 
-      const now = Date.now();
-
-      if (data.status === 'PAID') {
-        // Update payment table
-        run(
-          `UPDATE payments SET status = 'paid', transaction_reference = ?, raw_response = ?, updated_at = ?
-           WHERE order_id = ?;`,
-          [data.providerTxId, JSON.stringify(data.rawPayload), now, data.orderId]
-        );
-
-        // Update order status
-        run(
-          `UPDATE orders SET payment_status = 'paid', order_status = 'confirmed', updated_at = ?
-           WHERE id = ?;`,
-          [now, data.orderId]
-        );
-
-        // Record order status history
-        run(
-          `INSERT INTO order_status_history (id, order_id, status, notes, changed_by, created_at)
-           VALUES (?, ?, 'confirmed', 'Online payment verified by payment gateway', 'system_webhook', ?);`,
-          [`osh_${now}_${Math.random().toString(36).substring(2, 6)}`, data.orderId, now]
-        );
-
-        // Record payment transaction
-        run(
-          `INSERT INTO payment_transactions (id, order_id, amount, provider_tx_id, status, payload, created_at)
-           VALUES (?, ?, ?, ?, 'success', ?, ?);`,
-          [`ptx_${now}_${crypto.randomBytes(4).toString('hex')}`, data.orderId, data.amount, data.providerTxId, JSON.stringify(data.rawPayload), now]
-        );
-
-        return { success: true, message: 'Payment confirmed and verified by server' };
-      } else {
-        run(
-          `UPDATE payments SET status = 'failed', updated_at = ? WHERE order_id = ?;`,
-          [now, data.orderId]
-        );
-        run(
-          `UPDATE orders SET payment_status = 'failed', updated_at = ? WHERE id = ?;`,
-          [now, data.orderId]
-        );
-        return { success: true, message: 'Payment failure recorded' };
-      }
+      return {
+        success: true,
+        message: 'Payment confirmed successfully.'
+      };
     });
   }
 }

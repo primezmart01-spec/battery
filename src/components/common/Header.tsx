@@ -21,6 +21,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
 import { useCompare } from '../../context/CompareContext';
+import { useStoreSettings } from '../../context/StoreSettingsContext';
 import { Brand } from '../../types';
 
 interface HeaderProps {
@@ -32,6 +33,14 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentRoute }) => {
   const { user, logout } = useAuth();
   const { totalItems, subtotal, setIsCartOpen } = useCart();
   const { compareIds } = useCompare();
+  const { settings } = useStoreSettings();
+
+  const businessName = settings.business_name || 'Chaudhary Battery And UPS F10';
+  const tagline = settings.business_tagline || 'Authorised Dealer & Wholesaler for AGS, Daewoo, Volta, Osaka, Exide & Phoenix';
+  const address = settings.business_address || 'Shop # 14-16, Ground Floor, Capital Trade Centre, F-10 Markaz, Islamabad, 44000, Pakistan';
+  const phone = settings.business_phone || '+92 51 2212345';
+  const whatsapp = settings.business_whatsapp || '+92 300 5551234';
+  const email = settings.business_email || 'sales@chaudharybattery.pk';
 
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -111,77 +120,68 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentRoute }) => {
   return (
     <header className="sticky top-0 z-40 bg-slate-900 text-white shadow-md border-b border-slate-800">
       {/* 1. Top Announcement & Emergency Service Bar */}
-      <div className="bg-slate-950 text-slate-300 text-xs border-b border-slate-800/80 py-2 px-4 sm:px-6">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-4 flex-wrap">
-            <span className="flex items-center gap-1.5 text-amber-400 font-semibold tracking-wide">
-              <Zap className="w-3.5 h-3.5 animate-pulse" />
-              AUTHORISED WHOLESALER IN F-10 MARKAZ ISLAMABAD
+      <div className="bg-slate-950 text-slate-300 text-[10px] sm:text-xs border-b border-slate-800/80 py-1.5 sm:py-2 px-3 sm:px-6">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-4 flex-wrap justify-center sm:justify-start">
+            <span className="flex items-center gap-1.5 text-amber-400 font-extrabold tracking-wide uppercase">
+              <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-pulse" />
+              {businessName}
             </span>
-            <span className="hidden md:inline text-slate-500">|</span>
-            <span className="hidden md:flex items-center gap-1 text-slate-300">
-              <MapPin className="w-3.5 h-3.5 text-red-500" />
-              Shop # 14-16, Capital Trade Centre, F-10 Markaz, Islamabad
+            <span className="hidden md:inline text-slate-700">|</span>
+            <span className="hidden md:flex items-center gap-1 text-slate-300 truncate max-w-xs">
+              <MapPin className="w-3 h-3 text-red-500" />
+              {address}
             </span>
           </div>
 
-          <div className="flex items-center gap-4 ml-auto">
-            <button
-              onClick={() => onNavigate('admin')}
-              className="flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded text-[11px] font-bold transition-colors"
-              title="Access Admin Management Panel"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-              <span>Admin Panel</span>
-            </button>
-            <span className="text-slate-700">|</span>
+          <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4">
             <a
-              href="tel:+92512212345"
-              className="flex items-center gap-1.5 hover:text-white transition-colors"
+              href={`tel:${phone.replace(/\s+/g, '')}`}
+              className="flex items-center gap-1 hover:text-white transition-colors"
             >
-              <Phone className="w-3.5 h-3.5 text-red-500" />
-              <span className="font-medium">+92 51 2212345</span>
+              <Phone className="w-3 h-3 text-red-500" />
+              <span className="font-bold">{phone}</span>
             </a>
-            <span className="text-slate-700">|</span>
+            <span className="text-slate-800">|</span>
             <a
-              href="https://wa.me/923005551234"
+              href={`https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-emerald-400 font-semibold hover:text-emerald-300 transition-colors"
+              className="flex items-center gap-1 text-emerald-400 font-bold hover:text-emerald-300 transition-colors"
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />
-              WhatsApp: +92 300 5551234
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping inline-block" />
+              <span>WhatsApp</span>
             </a>
           </div>
         </div>
       </div>
 
       {/* 2. Main Header with Branding & Search */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5">
-        <div className="flex items-center justify-between gap-4 md:gap-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3.5">
+        <div className="flex items-center justify-between gap-2.5 sm:gap-4 md:gap-8">
           {/* Mobile Menu Button */}
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="lg:hidden p-2 text-slate-300 hover:text-white focus:outline-none"
+            className="lg:hidden p-1.5 text-slate-300 hover:text-white focus:outline-none flex-shrink-0"
             aria-label="Open Navigation Menu"
           >
-            <Menu className="w-6 h-6" />
+            <Menu className="w-5.5 h-5.5 sm:w-6 sm:h-6" />
           </button>
 
           {/* Brand Logo */}
           <div
             onClick={() => onNavigate('home')}
-            className="cursor-pointer flex items-center gap-3 select-none flex-shrink-0"
+            className="cursor-pointer flex items-center gap-1.5 sm:gap-3 select-none flex-shrink-0"
           >
-            <div className="w-10 h-10 rounded bg-red-600 flex items-center justify-center font-extrabold text-white shadow-lg shadow-red-900/30">
-              <Zap className="w-6 h-6" />
+            <div className="w-7 h-7 sm:w-10 sm:h-10 rounded bg-red-600 flex items-center justify-center font-extrabold text-white shadow-lg shadow-red-900/30 flex-shrink-0">
+              <Zap className="w-4 h-4 sm:w-6 sm:h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-1.5 leading-none">
-                <span className="font-extrabold tracking-tight text-lg md:text-xl text-white">CHAUDHARY</span>
-                <span className="font-extrabold tracking-tight text-lg md:text-xl text-red-500">BATTERY</span>
+              <div className="flex items-center gap-0.5 sm:gap-1 leading-none">
+                <span className="font-extrabold tracking-tight text-xs sm:text-lg md:text-xl text-white">CHAUDHARY</span>
+                <span className="font-extrabold tracking-tight text-xs sm:text-lg md:text-xl text-red-500">BATTERY</span>
               </div>
-              <div className="text-[10px] tracking-wider text-slate-400 font-semibold uppercase mt-0.5">
+              <div className="text-[9px] tracking-wider text-slate-400 font-semibold uppercase mt-0.5 hidden md:block">
                 & UPS · F-10 MARKAZ ISLAMABAD
               </div>
             </div>
@@ -258,7 +258,7 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentRoute }) => {
             {/* Compare */}
             <button
               onClick={() => onNavigate('compare')}
-              className="relative p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+              className="relative p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors hidden sm:flex"
               title="Compare Batteries"
               aria-label="Compare Batteries"
             >
@@ -273,21 +273,11 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentRoute }) => {
             {/* Wishlist */}
             <button
               onClick={() => onNavigate('wishlist')}
-              className="relative p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+              className="relative p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors hidden sm:flex"
               title="Saved Wishlist"
               aria-label="Saved Wishlist"
             >
               <Heart className="w-5 h-5" />
-            </button>
-
-            {/* Admin Quick Link */}
-            <button
-              onClick={() => onNavigate('admin')}
-              className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/35 text-xs font-bold transition-colors"
-              title="Open Admin Management Panel"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400" />
-              <span>Admin</span>
             </button>
 
             {/* Cart Button */}
@@ -588,6 +578,55 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentRoute }) => {
                 </div>
 
                 <div className="pt-3 border-t border-slate-800 space-y-1">
+                  <div className="px-3 text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
+                    My Account & Tools
+                  </div>
+                  <button
+                    onClick={() => { setMobileMenuOpen(false); onNavigate('wishlist'); }}
+                    className="w-full text-left py-2 px-3 rounded hover:bg-slate-800 text-slate-200 flex items-center gap-2"
+                  >
+                    <Heart className="w-4 h-4 text-red-500" />
+                    <span>My Saved Wishlist</span>
+                  </button>
+                  <button
+                    onClick={() => { setMobileMenuOpen(false); onNavigate('compare'); }}
+                    className="w-full text-left py-2 px-3 rounded hover:bg-slate-800 text-slate-200 flex items-center gap-2"
+                  >
+                    <Scale className="w-4 h-4 text-blue-400" />
+                    <span>Compare Matrix ({compareIds.length})</span>
+                  </button>
+                  {user && (user.role === 'admin' || user.role === 'super_admin') && (
+                    <button
+                      onClick={() => { setMobileMenuOpen(false); onNavigate('admin'); }}
+                      className="w-full text-left py-2 px-3 rounded hover:bg-slate-800 text-amber-400 flex items-center gap-2 font-bold"
+                    >
+                      <SlidersHorizontal className="w-4 h-4 text-amber-400" />
+                      <span>Admin Panel</span>
+                    </button>
+                  )}
+                  {user ? (
+                    <button
+                      onClick={() => { setMobileMenuOpen(false); onNavigate('account'); }}
+                      className="w-full text-left py-2 px-3 rounded hover:bg-slate-800 text-slate-200 flex items-center gap-2"
+                    >
+                      <UserIcon className="w-4 h-4 text-slate-400" />
+                      <span>My Profile ({user.firstName})</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => { setMobileMenuOpen(false); onNavigate('login'); }}
+                      className="w-full text-left py-2 px-3 rounded hover:bg-slate-800 text-red-400 flex items-center gap-2 font-bold"
+                    >
+                      <UserIcon className="w-4 h-4 text-red-500" />
+                      <span>Sign In / Register</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="pt-3 border-t border-slate-800 space-y-1">
+                  <div className="px-3 text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
+                    Customer Service
+                  </div>
                   <button
                     onClick={() => { setMobileMenuOpen(false); onNavigate('track-order'); }}
                     className="w-full text-left py-2 px-3 rounded hover:bg-slate-800 text-slate-200"
@@ -605,13 +644,6 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentRoute }) => {
                     className="w-full text-left py-2 px-3 rounded hover:bg-slate-800 text-slate-200"
                   >
                     Contact & Shop Location
-                  </button>
-                  <button
-                    onClick={() => { setMobileMenuOpen(false); onNavigate('admin'); }}
-                    className="w-full text-left py-2.5 px-3 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold flex items-center gap-2 mt-2"
-                  >
-                    <SlidersHorizontal className="w-4 h-4 text-amber-400" />
-                    <span>Admin Management Portal</span>
                   </button>
                 </div>
               </div>

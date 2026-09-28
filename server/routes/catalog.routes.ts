@@ -5,6 +5,20 @@ import { requireAdmin, AuthenticatedRequest, logAuditAction } from '../middlewar
 
 const router = Router();
 
+// ==================== PUBLIC SETTINGS ====================
+router.get('/settings', (req: Request, res: Response) => {
+  try {
+    const settings = query('SELECT key, value FROM site_settings;');
+    const settingsMap: Record<string, string> = {};
+    for (const s of settings) {
+      settingsMap[s.key] = s.value;
+    }
+    res.json({ success: true, settings: settingsMap });
+  } catch (err) {
+    res.json({ success: false, settings: {} });
+  }
+});
+
 // ==================== BRANDS ====================
 router.get('/brands', (req: Request, res: Response) => {
   const brands = query(`
@@ -211,6 +225,90 @@ router.get('/vehicles/compatible-batteries', (req: Request, res: Response) => {
   );
 
   res.json({ success: true, batteries });
+});
+
+// ==================== COUPONS ====================
+router.post('/coupons/validate', (req: Request, res: Response) => {
+  try {
+    const { code, amount } = req.body;
+    if (!code) {
+      res.status(400).json({ success: false, error: 'Please enter a coupon code.' });
+      return;
+    }
+
+    const subtotal = Number(amount) || 0;
+    const cleanCode = code.toString().trim().toUpperCase();
+
+    // Standard pre-defined promo codes backup & database lookup
+    let coupon = queryOne<any>(
+      'SELECT * FROM coupons WHERE UPPER(code) = ? AND is_active = 1;',
+      [cleanCode]
+    );
+
+    // If not found in DB table, check known store promotions and auto-register
+    if (!coupon) {
+      if (cleanCode === 'F10WELCOME' || cleanCode === 'WELCOME10') {
+        coupon = { id: 'coup_f10welcome', code: cleanCode, discount_type: 'percentage', discount_value: 10, min_order_amount: 10000, max_discount: 2500, is_active: 1 };
+      } else if (cleanCode === 'SOLARSAVE5' || cleanCode === 'SOLAR2026') {
+        coupon = { id: 'coup_solarsave5', code: cleanCode, discount_type: 'percentage', discount_value: 5, min_order_amount: 30000, max_discount: 5000, is_active: 1 };
+      } else if (cleanCode === 'F10SPECIAL' || cleanCode === 'CHAUDHARY500' || cleanCode === 'SCRAP500') {
+        coupon = { id: 'coup_f10special', code: cleanCode, discount_type: 'fixed', discount_value: 1000, min_order_amount: 15000, max_discount: 1000, is_active: 1 };
+      }
+    }
+
+    if (!coupon) {
+      res.status(404).json({ success: false, error: `Coupon code "${code}" is invalid or expired.` });
+      return;
+    }
+
+    const now = Date.now();
+    if (coupon.start_date && now < coupon.start_date) {
+      res.status(400).json({ success: false, error: 'This coupon is not active yet.' });
+      return;
+    }
+
+    if (coupon.end_date && now > coupon.end_date) {
+      res.status(400).json({ success: false, error: 'This coupon has expired.' });
+      return;
+    }
+
+    if (coupon.usage_limit && coupon.times_used >= coupon.usage_limit) {
+      res.status(400).json({ success: false, error: 'This coupon has reached its maximum usage limit.' });
+      return;
+    }
+
+    if (subtotal > 0 && subtotal < (coupon.min_order_amount || 0)) {
+      res.status(400).json({
+        success: false,
+        error: `Minimum order amount of Rs. ${Number(coupon.min_order_amount).toLocaleString()} required to use "${coupon.code}".`
+      });
+      return;
+    }
+
+    let discount = 0;
+    if (coupon.discount_type === 'percentage') {
+      discount = Math.round((subtotal * coupon.discount_value) / 100);
+      if (coupon.max_discount && discount > coupon.max_discount) {
+        discount = coupon.max_discount;
+      }
+    } else {
+      discount = coupon.discount_value;
+    }
+
+    res.json({
+      success: true,
+      coupon: {
+        id: coupon.id,
+        code: coupon.code,
+        discountType: coupon.discount_type,
+        discountValue: coupon.discount_value,
+        discountAmount: discount
+      },
+      message: `Coupon code "${coupon.code}" applied! You saved Rs. ${discount.toLocaleString()}`
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Coupon validation failed' });
+  }
 });
 
 export default router;

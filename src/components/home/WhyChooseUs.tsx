@@ -6,12 +6,12 @@ export const WhyChooseUs: React.FC = () => {
     {
       icon: ShieldCheck,
       title: '100% Genuine Stamped Stock',
-      desc: 'No duplicate, refurbished, or low-acid batteries. Every battery carries an original serial barcode and our authorized F-10 dealer seal.'
+      desc: 'No duplicate, refurbished, or low-acid batteries. Every battery carries an original manufacturer serial barcode and authorized F-10 dealer seal.'
     },
     {
       icon: Truck,
       title: 'Rapid 45-Min Mobile Fitting',
-      desc: 'Stranded on the road or at home in Islamabad? Our mobile technicians arrive on a bike or van with replacement battery and terminal grease.'
+      desc: 'Stranded on the road or at home in Islamabad? Our mobile technicians arrive with replacement battery, terminal grease, and fitting tools.'
     },
     {
       icon: Wrench,
@@ -21,32 +21,32 @@ export const WhyChooseUs: React.FC = () => {
     {
       icon: RotateCcw,
       title: 'Old Battery Scrap Rebate',
-      desc: 'Get fair market cash discount on your old dead battery. We ensure eco-friendly, certified lead recycling.'
+      desc: 'Get fair market cash discount (Rs. 500) on your old dead battery. We ensure certified eco-friendly lead recycling.'
     },
     {
       icon: Award,
-      title: 'Hassle-Free Warranty Claims',
-      desc: 'We handle official warranty claims on the spot at our F-10 Markaz shop with instant load tester verification.'
+      title: 'Direct Warranty Claim Center',
+      desc: 'We handle official warranty claims on the spot at our F-10 Markaz shop with computerized load tester verification.'
     },
     {
       icon: PhoneCall,
       title: 'Solar & Inverter Advisory',
-      desc: 'Expert sizing for home solar systems (Inverex, Crown, SolarMax) to ensure maximum backup hours without inverter error codes.'
+      desc: 'Expert sizing for home solar systems (Inverex, Crown, SolarMax, Homage) to ensure maximum backup hours without error codes.'
     }
   ];
 
   return (
-    <section className="py-16 bg-slate-900 text-white border-b border-slate-800">
+    <section className="py-16 bg-white border-b border-slate-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="text-center max-w-2xl mx-auto mb-12">
-          <div className="text-red-500 font-bold text-xs uppercase tracking-wider mb-2">
-            Why Islamabad Chooses Us
+          <div className="text-red-600 font-extrabold text-xs uppercase tracking-wider mb-2">
+            Why Islamabad Motorists & Homeowners Choose Us
           </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            The Chaudhary Battery & UPS F-10 Standard
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+            The Chaudhary Battery & UPS Standard
           </h2>
-          <p className="text-slate-400 text-xs sm:text-sm mt-2">
-            Serving motorists, homeowners, and commercial establishments across Islamabad and Rawalpindi with integrity and technical excellence.
+          <p className="text-slate-500 text-xs sm:text-sm mt-2">
+            Serving motorists, homeowners, and commercial establishments across Islamabad and Rawalpindi with integrity and technical precision.
           </p>
         </div>
 
@@ -56,13 +56,13 @@ export const WhyChooseUs: React.FC = () => {
             return (
               <div
                 key={idx}
-                className="bg-slate-950/70 border border-slate-800 rounded-xl p-6 hover:border-slate-700 transition-colors"
+                className="bg-slate-50/50 border border-slate-200/80 rounded-2xl p-6 hover:border-slate-300 hover:shadow-md transition-all duration-300"
               >
-                <div className="w-12 h-12 rounded-lg bg-red-600/15 border border-red-500/20 text-red-500 flex items-center justify-center mb-4">
-                  <Icon className="w-6 h-6" />
+                <div className="w-12 h-12 rounded-xl bg-red-50 border border-red-100 text-red-600 flex items-center justify-center mb-4">
+                  <Icon className="w-6 h-6 animate-pulse" />
                 </div>
-                <h3 className="text-base font-bold text-white mb-2">{p.title}</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">{p.desc}</p>
+                <h3 className="text-base font-extrabold text-slate-950 mb-2">{p.title}</h3>
+                <p className="text-xs text-slate-600 leading-relaxed">{p.desc}</p>
               </div>
             );
           })}

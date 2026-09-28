@@ -141,6 +141,7 @@ export interface OrderItem {
   product_id: string;
   variant_id?: string;
   product_title: string;
+  title?: string;
   sku: string;
   ah_capacity?: number;
   voltage?: string;
@@ -149,6 +150,7 @@ export interface OrderItem {
   quantity: number;
   subtotal_price: number;
   product_image?: string;
+  image_url?: string;
 }
 
 export interface Order {
@@ -164,16 +166,20 @@ export interface Order {
   tax_amount: number;
   total_amount: number;
   coupon_code?: string;
-  payment_method: 'cod' | 'payfast' | 'jazzcash' | 'easypaisa' | 'bank_transfer';
+  payment_method: 'cod' | 'payfast' | 'card' | 'jazzcash' | 'easypaisa' | 'bank_transfer';
   payment_status: 'pending' | 'paid' | 'failed' | 'refunded';
   order_status: 'pending' | 'confirmed' | 'processing' | 'packed' | 'shipped' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'refunded';
   shipping_notes?: string;
   tracking_number?: string;
+  transaction_reference?: string;
+  transactionReference?: string;
   created_at: number;
   updated_at: number;
   items?: OrderItem[];
   shippingAddress?: any;
   billingAddress?: any;
+  shipping_address?: any;
+  billing_address?: any;
   timeline?: any[];
   payment?: any;
 }

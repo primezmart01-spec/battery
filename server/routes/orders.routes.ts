@@ -46,7 +46,13 @@ const checkoutSchema = z.object({
   }).optional(),
   billingSameAsShipping: z.boolean().default(true),
   shippingMethodId: z.string().optional(),
-  paymentMethod: z.enum(['cod', 'payfast', 'jazzcash', 'easypaisa', 'bank_transfer']),
+  paymentMethod: z.enum(['cod', 'payfast', 'card', 'jazzcash', 'easypaisa', 'bank_transfer']),
+  transactionReference: z.string().optional(),
+  bankDetails: z.object({
+    senderBank: z.string().optional(),
+    senderAccountTitle: z.string().optional(),
+    transactionReference: z.string().optional()
+  }).optional(),
   couponCode: z.string().optional(),
   shippingNotes: z.string().max(500).optional(),
   oldBatteryTradeIn: z.boolean().optional(),
@@ -74,13 +80,28 @@ router.post('/checkout', authenticateOptional, checkoutLimiter, async (req: Auth
       billingAddress,
       billingSameAsShipping,
       paymentMethod,
+      transactionReference,
       couponCode,
       shippingNotes,
       oldBatteryTradeIn,
       items: clientItems
     } = parse.data;
 
-    const userId = req.user?.id || null;
+    // Enforce that order can ONLY be placed if the user has an account
+    let userId = req.user?.id || null;
+    if (!userId) {
+      const existing = queryOne<any>('SELECT id, email, first_name, last_name, role FROM users WHERE email = ?;', [customerEmail.toLowerCase().trim()]);
+      if (existing) {
+        userId = existing.id;
+      } else {
+        res.status(401).json({
+          success: false,
+          requireAccount: true,
+          error: 'An account is required to place an order. Please create an account or sign in to proceed.'
+        });
+        return;
+      }
+    }
 
     // Concurrency Lock: Prevent simultaneous stock depletion race conditions (Section 74)
     const orderResult = await withLock(async () => {
@@ -203,21 +224,56 @@ router.post('/checkout', authenticateOptional, checkoutLimiter, async (req: Auth
       const now = Date.now();
       const randomSuffix = Math.floor(1000 + Math.random() * 9000);
       const orderNumber = `CBF10-${new Date().getFullYear()}-${randomSuffix}`;
+      
+      // Auto-generate Courier Tracking ID for every new order
+      const trackingNumber = `TRK-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+
+      // Format Client Bank / Payment Details
+      let formattedTxRef = transactionReference || '';
+      const bankDet = (req.body as any).bankDetails;
+      if (bankDet) {
+        const parts: string[] = [];
+        if (bankDet.senderBank) parts.push(`Bank/Provider: ${bankDet.senderBank}`);
+        if (bankDet.senderAccountTitle) parts.push(`Account Title: ${bankDet.senderAccountTitle}`);
+        if (bankDet.transactionReference) parts.push(`Ref/TRX: ${bankDet.transactionReference}`);
+        if (parts.length > 0) formattedTxRef = parts.join(' | ');
+      }
+      if (!formattedTxRef) {
+        if (paymentMethod === 'cod') {
+          formattedTxRef = 'Cash on Delivery (Pay cash directly to technician upon installation)';
+        } else {
+          formattedTxRef = `${paymentMethod.toUpperCase()} Online Payment`;
+        }
+      }
+
+      const initialPaymentStatus = (paymentMethod === 'card' || paymentMethod === 'jazzcash' || paymentMethod === 'easypaisa') ? 'paid' : 'pending';
+      const initialOrderStatus = initialPaymentStatus === 'paid' ? 'processing' : 'pending';
+
+      // Ensure transaction_reference column exists
+      try { run('ALTER TABLE orders ADD COLUMN transaction_reference TEXT;'); } catch (_) {}
 
       // Database Transaction for Atomicity (Section 72)
       return transaction(() => {
-        // Insert order
+        // Insert order with auto-generated tracking number and client bank details
         run(
           `INSERT INTO orders (
             id, order_number, user_id, customer_name, customer_email, customer_phone,
             subtotal, discount, shipping_amount, tax_amount, total_amount, coupon_code,
-            payment_method, payment_status, order_status, shipping_notes, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', ?, ?, ?);`,
+            payment_method, payment_status, order_status, shipping_notes, tracking_number, transaction_reference, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
           [
             orderId, orderNumber, userId, customerName, customerEmail, customerPhone,
             subtotal, discountAmount, shippingAmount, taxAmount, grandTotal, appliedCoupon ? appliedCoupon.code : null,
-            paymentMethod, shippingNotes || '', now, now
+            paymentMethod, initialPaymentStatus, initialOrderStatus, shippingNotes || '', trackingNumber, formattedTxRef, now, now
           ]
+        );
+
+        // Record in Payments Table
+        const payId = `pay_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+        run(
+          `INSERT INTO payments (id, order_id, amount, currency, provider, payment_method, status, transaction_reference, raw_response, created_at, updated_at)
+           VALUES (?, ?, ?, 'PKR', ?, ?, ?, ?, ?, ?, ?);`,
+          [payId, orderId, grandTotal, paymentMethod, paymentMethod, initialPaymentStatus, formattedTxRef, JSON.stringify(bankDet || {}), now, now]
         );
 
         // Deduct inventory & record order items snapshot
@@ -299,11 +355,14 @@ router.post('/checkout', authenticateOptional, checkoutLimiter, async (req: Auth
         return {
           orderId,
           orderNumber,
+          trackingNumber,
           totalAmount: grandTotal,
           items: verifiedItems,
           order: {
             id: orderId,
             order_number: orderNumber,
+            tracking_number: trackingNumber,
+            transaction_reference: formattedTxRef,
             customer_name: customerName,
             customer_email: customerEmail,
             customer_phone: customerPhone,
@@ -313,7 +372,7 @@ router.post('/checkout', authenticateOptional, checkoutLimiter, async (req: Auth
             tax_amount: taxAmount,
             total_amount: grandTotal,
             payment_method: paymentMethod,
-            payment_status: 'pending'
+            payment_status: initialPaymentStatus
           }
         };
       });
@@ -354,15 +413,27 @@ router.post('/checkout', authenticateOptional, checkoutLimiter, async (req: Auth
 // Get User Orders (Protected with IDOR validation)
 router.get('/', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     const userId = req.user!.id;
-    const orders = query(
+    const userEmail = (req.user!.email || '').toLowerCase().trim();
+    const rawOrders = query(
       `SELECT o.*,
               (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) as total_items
        FROM orders o
-       WHERE o.user_id = ?
+       WHERE o.user_id = ? OR LOWER(o.customer_email) = ?
        ORDER BY o.created_at DESC;`,
-      [userId]
+      [userId, userEmail]
     );
+
+    const orders = rawOrders.map(o => {
+      const items = query('SELECT * FROM order_items WHERE order_id = ?;', [o.id]);
+      const shippingAddress = queryOne('SELECT * FROM order_addresses WHERE order_id = ? AND type = "shipping";', [o.id]);
+      return {
+        ...o,
+        items,
+        shippingAddress
+      };
+    });
 
     res.json({ success: true, orders });
   } catch (err) {
@@ -415,36 +486,85 @@ router.get('/:idOrNumber', authenticateOptional, (req: AuthenticatedRequest, res
   }
 });
 
-// Customer Public Order Tracking (by Order Number + Phone/Email)
+// Customer Public Order Tracking (by Order Number OR Tracking Number + optional Phone/Email)
 router.post('/track', (req: Request, res: Response) => {
   try {
-    const { orderNumber, phoneOrEmail } = req.body;
-    if (!orderNumber || !phoneOrEmail) {
-      res.status(400).json({ success: false, error: 'Order number and phone/email are required' });
+    const { orderNumber, trackingNumber, phoneOrEmail } = req.body;
+    const identifier = (orderNumber || trackingNumber || '').toString().trim();
+
+    if (!identifier) {
+      res.status(400).json({ success: false, error: 'Please enter your Order Number (e.g. CBF10-2026-XXXX) or Tracking ID.' });
       return;
     }
 
-    const cleanInput = phoneOrEmail.toString().trim().toLowerCase();
-    const order = queryOne<any>(
-      `SELECT id, order_number, customer_name, total_amount, payment_status, order_status, tracking_number, created_at
-       FROM orders
-       WHERE UPPER(order_number) = UPPER(?) AND (LOWER(customer_email) = ? OR customer_phone LIKE ?);`,
-      [orderNumber.trim(), cleanInput, `%${cleanInput.replace(/\D/g, '')}%`]
-    );
+    let order: any = null;
+    const cleanInput = (phoneOrEmail || '').toString().trim().toLowerCase();
+
+    if (cleanInput) {
+      order = queryOne<any>(
+        `SELECT id, order_number, customer_name, customer_email, customer_phone, total_amount, payment_status, order_status, tracking_number, shipping_notes, created_at, updated_at
+         FROM orders
+         WHERE (UPPER(order_number) = UPPER(?) OR UPPER(tracking_number) = UPPER(?))
+           AND (LOWER(customer_email) = ? OR customer_phone LIKE ?);`,
+        [identifier, identifier, cleanInput, `%${cleanInput.replace(/\D/g, '')}%`]
+      );
+    } else {
+      order = queryOne<any>(
+        `SELECT id, order_number, customer_name, customer_email, customer_phone, total_amount, payment_status, order_status, tracking_number, shipping_notes, created_at, updated_at
+         FROM orders
+         WHERE UPPER(order_number) = UPPER(?) OR UPPER(tracking_number) = UPPER(?);`,
+        [identifier, identifier]
+      );
+    }
 
     if (!order) {
-      res.status(404).json({ success: false, error: 'No matching order found. Please check order number and contact details.' });
+      res.status(404).json({ success: false, error: `No active order found with identifier "${identifier}". Please check your order number or tracking ID.` });
       return;
     }
 
     const timeline = query('SELECT status, notes, created_at FROM order_status_history WHERE order_id = ? ORDER BY created_at ASC;', [order.id]);
-    const items = query('SELECT product_title, sku, ah_capacity, quantity, unit_price FROM order_items WHERE order_id = ?;', [order.id]);
+    const items = query('SELECT product_title, sku, ah_capacity, quantity, unit_price, subtotal_price, product_image FROM order_items WHERE order_id = ?;', [order.id]);
+    const shippingAddress = queryOne('SELECT full_name, phone, address_line1, address_line2, city, province FROM order_addresses WHERE order_id = ? AND type = "shipping";', [order.id]);
 
     res.json({
       success: true,
       tracking: {
         ...order,
         items,
+        shippingAddress,
+        timeline
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Order tracking failed' });
+  }
+});
+
+router.get('/track/:identifier', (req: Request, res: Response) => {
+  try {
+    const identifier = req.params.identifier.trim();
+    const order = queryOne<any>(
+      `SELECT id, order_number, customer_name, customer_email, customer_phone, total_amount, payment_status, order_status, tracking_number, shipping_notes, created_at, updated_at
+       FROM orders
+       WHERE UPPER(order_number) = UPPER(?) OR UPPER(tracking_number) = UPPER(?);`,
+      [identifier, identifier]
+    );
+
+    if (!order) {
+      res.status(404).json({ success: false, error: 'Order not found' });
+      return;
+    }
+
+    const timeline = query('SELECT status, notes, created_at FROM order_status_history WHERE order_id = ? ORDER BY created_at ASC;', [order.id]);
+    const items = query('SELECT product_title, sku, ah_capacity, quantity, unit_price, subtotal_price, product_image FROM order_items WHERE order_id = ?;', [order.id]);
+    const shippingAddress = queryOne('SELECT full_name, phone, address_line1, address_line2, city, province FROM order_addresses WHERE order_id = ? AND type = "shipping";', [order.id]);
+
+    res.json({
+      success: true,
+      tracking: {
+        ...order,
+        items,
+        shippingAddress,
         timeline
       }
     });

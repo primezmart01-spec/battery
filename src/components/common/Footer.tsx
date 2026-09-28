@@ -1,4 +1,5 @@
 import React from 'react';
+import { useStoreSettings } from '../../context/StoreSettingsContext';
 import {
   Zap,
   Phone,
@@ -17,6 +18,14 @@ interface FooterProps {
 }
 
 export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
+  const { settings } = useStoreSettings();
+  const businessName = settings.business_name || 'Chaudhary Battery And UPS F10';
+  const tagline = settings.business_tagline || 'Authorised Dealer & Wholesaler for AGS, Daewoo, Volta, Osaka, Exide & Phoenix';
+  const address = settings.business_address || 'Shop # 14-16, Ground Floor, Capital Trade Centre, F-10 Markaz, Islamabad, 44000, Pakistan';
+  const phone = settings.business_phone || '+92 51 2212345';
+  const whatsapp = settings.business_whatsapp || '+92 300 5551234';
+  const email = settings.business_email || 'sales@chaudharybattery.pk';
+
   return (
     <footer className="bg-slate-950 text-slate-300 border-t border-slate-800 text-xs">
       {/* 1. Value Props Strip */}
@@ -73,26 +82,26 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <div className="w-8 h-8 rounded bg-red-600 flex items-center justify-center font-bold text-white">
                 <Zap className="w-5 h-5" />
               </div>
-              <div className="font-extrabold text-base tracking-tight text-white">
-                CHAUDHARY BATTERY AND UPS F10
+              <div className="font-extrabold text-base tracking-tight text-white uppercase">
+                {businessName}
               </div>
             </div>
             <p className="text-slate-400 leading-relaxed text-xs max-w-sm">
-              Islamabad's premier automotive and power battery master dealer. Specializing in starting batteries for cars, heavy trucks, solar tall tubular deep-cycle storage, and commercial UPS inverters in F-10 Markaz.
+              {tagline}
             </p>
 
             <div className="space-y-2 pt-1 text-slate-300">
               <div className="flex items-start gap-2">
                 <MapPin className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                <span>Shop # 14-16, Capital Trade Centre, F-10 Markaz, Islamabad, 44000, Pakistan</span>
+                <span>{address}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Phone className="w-4 h-4 text-red-500 flex-shrink-0" />
-                <span>+92 51 2212345 / Mobile: +92 300 5551234</span>
+                <span>Phone: {phone} | WhatsApp: {whatsapp}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="w-4 h-4 text-red-500 flex-shrink-0" />
-                <span>sales@chaudharybattery.pk</span>
+                <span>{email}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-amber-500 flex-shrink-0" />
@@ -223,15 +232,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <li>
                 <button onClick={() => onNavigate('terms')} className="hover:text-white transition-colors">
                   Terms of Service
-                </button>
-              </li>
-              <li className="pt-2">
-                <button
-                  onClick={() => onNavigate('admin')}
-                  className="text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1.5 transition-colors"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Admin Portal (Staff Login)</span>
                 </button>
               </li>
             </ul>

@@ -3,6 +3,7 @@ import { Heart, Trash2, ShoppingCart, ShieldCheck, Zap } from 'lucide-react';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { useWishlist } from '../context/WishlistContext';
 
 interface WishlistPageProps {
   onNavigate: (route: string, param?: string) => void;
@@ -11,35 +12,60 @@ interface WishlistPageProps {
 export const WishlistPage: React.FC<WishlistPageProps> = ({ onNavigate }) => {
   const { user } = useAuth();
   const { addToCart } = useCart();
+  const { wishlistIds, toggleWishlist } = useWishlist();
   const [items, setItems] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) {
+    setIsLoading(true);
+    const token = localStorage.getItem('cbf10_token');
+
+    if (user && token) {
+      fetch('/api/wishlist', {
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include'
+      })
+        .then(r => r.json())
+        .then(d => {
+          if (d.success && Array.isArray(d.items)) {
+            setItems(d.items);
+          } else {
+            fetchLocalProducts(wishlistIds);
+          }
+        })
+        .catch(() => fetchLocalProducts(wishlistIds))
+        .finally(() => setIsLoading(false));
+    } else {
+      fetchLocalProducts(wishlistIds);
+    }
+  }, [user, wishlistIds.join(',')]);
+
+  const fetchLocalProducts = async (ids: string[]) => {
+    if (ids.length === 0) {
+      setItems([]);
       setIsLoading(false);
       return;
     }
-
-    fetch('/api/wishlist')
-      .then(r => r.json())
-      .then(d => {
-        if (d.success) setItems(d.items || []);
-      })
-      .catch(console.error)
-      .finally(() => setIsLoading(false));
-  }, [user]);
+    try {
+      const res = await fetch('/api/products?limit=50');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.products)) {
+        const matched = data.products.filter((p: any) => ids.includes(p.id));
+        setItems(matched.map((p: any) => ({
+          ...p,
+          image_url: p.primary_image || p.image_url || '/uploads/battery_ags_gl65.jpg'
+        })));
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleRemove = async (productId: string) => {
-    try {
-      await fetch('/api/wishlist/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId })
-      });
-      setItems(prev => prev.filter(i => i.id !== productId));
-    } catch (err) {
-      console.error(err);
-    }
+    await toggleWishlist(productId);
+    setItems(prev => prev.filter(i => i.id !== productId));
   };
 
   if (!user) {
